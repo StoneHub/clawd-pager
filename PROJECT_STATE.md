@@ -1,29 +1,67 @@
 # Clawd Pager - Project State
 
-**Last Updated**: 2026-01-27
+**Last Updated**: 2026-01-27 17:50 EST
 
-## Project Overview
+## ✅ WORKING - Integration Successful!
 
-ESPHome project for M5StickC Plus that displays status messages from Home Assistant with a cyberpunk-style UI, audio feedback, and OTA updates.
+**Status**: Device successfully connected to Home Assistant with 1 device and 4 entities showing!
 
-## Critical Issue & Path Forward
+## Root Cause - VERSION MISMATCH (SOLVED)
 
-### 1. WiFi Disconnects (errno=128) - **Fix Pending Flash**
+### The Real Problem
 
-- **Symptoms**: Device connects, then drops with `errno=128` ("Socket not connected") after ~30s.
-- **Root Cause**: ESP32 WiFi power saving sleeps the radio, killing the persistent HA connection.
-- **Fix Applied in YAML**: `wifi: power_save_mode: none` (Line 38).
-- **Current Status**: **STALE FIRMWARE**. The user cancelled the clean build. The device is likely running code from 14:04 *without* this fix active.
-- **Action Required**: MUST run a **Clean Build** and Flash.
+**ESPHome version incompatibility with Home Assistant!**
 
-### 2. Slow Builds (15+ mins)
+- **Home Assistant**: 2025.1.4 with `aioesphomeapi==28.0.0`
+- **ESPHome (initial)**: 2026.1.2 with `aioesphomeapi==43.13.0`
+- **Problem**: Protocol mismatch caused "Marker byte invalid: 0" errors and handshake timeouts
 
-- **Cause**: Building on `/mnt/c/Users/...` forces WSL to use the majestic but slow 9P file bridge.
-- **Action Required**: Move project to `~/clawd-pager` (Linux Native FS). Builds will drop to ~45 seconds.
+### The Solution
 
-## Hardware
+**Downgraded ESPHome to 2024.12.4** to match Home Assistant's API protocol version:
 
-### M5StickC Plus 1.1 Specifications
+```bash
+source /home/monroe/clawd/esphome-env/bin/activate
+pip install esphome==2024.12.4  # Uses aioesphomeapi==24.6.2
+esphome clean clawd-pager.yaml
+esphome compile clawd-pager.yaml
+esphome upload clawd-pager.yaml --device 192.168.50.85
+```
+
+Then in Home Assistant:
+1. Delete ESPHome integration
+2. Re-add: Settings → Devices & Services → + Add Integration → ESPHome
+3. Host: `192.168.50.85`, Port: `6053`, No encryption key
+4. **SUCCESS**: 1 device, 4 entities appear!
+
+## Current Configuration
+
+### Versions (WORKING)
+- **ESPHome**: 2024.12.4
+- **aioesphomeapi**: 24.6.2
+- **Home Assistant**: 2025.1.4
+- **Framework**: Arduino + ESP-IDF
+- **Build**: 2026-01-27 17:45 EST
+
+### API Configuration
+```yaml
+api:
+  # Encryption disabled for compatibility testing
+  # key: "fyJkdxgmn1RZ9UqRQQWw++0Wks2mK+nMQ7RybTuwK+U="
+```
+
+### WiFi
+- **SSID**: FlyingChanges
+- **Password**: flyingchanges
+- **IP**: 192.168.50.85
+- **Power Save**: `none` (CRITICAL - prevents disconnects)
+
+### Home Assistant Entities
+- **Status Input**: `input_text.clawd_status` (main message display)
+- **Diagnostic**: `sun.sun` (API connection test)
+- **Entities Exposed**: WiFi Signal, Battery Level, Button A, Button B
+
+## Hardware Specs
 
 | Component | Details |
 | --------- | ------- |
@@ -31,57 +69,89 @@ ESPHome project for M5StickC Plus that displays status messages from Home Assist
 | **Display** | ST7789V2 1.14" TFT LCD (240x135, rotated 270°) |
 | **Power Management** | AXP192 PMIC (I2C: SDA=21, SCL=22, Addr=0x34) |
 | **Button A** | GPIO37 |
+| **Button B** | GPIO39 |
 | **Buzzer** | GPIO2 (passive, RTTTL compatible) |
 | **USB Chip** | FTDI FT230X (VID:PID = 0403:6001) |
 
-### ⚠️ CRITICAL: Backlight Control
+**CRITICAL**: M5StickC Plus 1.1 uses AXP192 for backlight control (not GPIO)!
 
-**The M5StickC Plus 1.1 does NOT control backlight via GPIO!**  
-Backlight is powered by **AXP192 PMU**. Use `external_components: [axp192]`.
+## Testing Message Flow
 
-## Configuration
+Send test message from Home Assistant:
+```yaml
+# Developer Tools → Actions
+service: input_text.set_value
+data:
+  entity_id: input_text.clawd_status
+  value: "Test Message!"
+```
 
-### WiFi
+Expected behavior:
+- M5StickC beeps (RTTTL tone)
+- Screen shows "SYNCED" (green) at top
+- Message displays in center
+- Battery % and WiFi signal shown
 
-- **SSID**: FlyingChanges
-- **Password**: flyingchanges
-- **IP**: 192.168.50.85
-- **Power Save**: `none` (CRITICAL)
+## Development Workflow
 
-### Home Assistant
+```bash
+# Activate environment
+source /home/monroe/clawd/esphome-env/bin/activate
 
-- **Status Sensor**: `input_text.clawd_status`
-- **Diagnostic**: `sun.sun` (used to verify API connection)
+# Compile
+esphome compile clawd-pager.yaml
 
-## Development Workflow (Recommended)
+# Upload via OTA
+esphome upload clawd-pager.yaml --device 192.168.50.85
 
-1. **Move to Linux**:
+# View logs
+esphome logs clawd-pager.yaml --device 192.168.50.85
+```
 
-    ```bash
-    mkdir -p ~/clawd-pager
-    cp -r /mnt/c/Users/monro/Codex/clawd-pager/* ~/clawd-pager/
-    cd ~/clawd-pager
-    ```
+## Troubleshooting History
 
-2. **Clean Build**:
+### Issues Encountered & Resolved
 
-    ```bash
-    esphome clean clawd-pager.yaml
-    ```
+1. **Black Screen** → Fixed with AXP192 component for backlight
+2. **WiFi Disconnects** → Fixed with `power_save_mode: none`
+3. **Encryption Key Mismatch** → Initially suspected, but was red herring
+4. **"Marker byte invalid: 0" errors** → **ROOT CAUSE: Version mismatch**
+5. **"No devices or entities"** → Fixed by downgrading ESPHome to 2024.12.4
 
-3. **Flash**:
+### What Didn't Work
 
-    ```bash
-    esphome run clawd-pager.yaml --device /dev/ttyUSB0
-    ```
+- Disabling encryption (wasn't the real issue)
+- Rebuilding firmware from scratch with same version
+- Restarting Home Assistant
+- USB flashing (didn't fix version mismatch)
+- Trying ESPHome 2025.12.7 (still too new, uses aioesphomeapi 43.2.1)
 
-## Resolved Issues
+### What Actually Fixed It
 
-- **Screen Black**: Fixed via AXP192 component.
-- **Upload Failures**: Fixed by using USB instead of flaky WiFi OTA.
-- **WiFi Power Save**: Config updated, pending flash.
+**ESPHome 2024.12.4** - The key was matching the API protocol version to Home Assistant's expectations.
 
-## Version Info
+## Version Compatibility Reference
 
-- ESPHome: 2026.1.2
-- Framework: Arduino + ESP-IDF 5.5.2
+| Home Assistant | Compatible ESPHome | aioesphomeapi |
+|----------------|-------------------|---------------|
+| 2025.1.4       | 2024.12.4         | 24.6.2        |
+| 2025.1.4       | ❌ 2025.12.7      | 43.2.1 (too new) |
+| 2025.1.4       | ❌ 2026.1.2       | 43.13.0 (too new) |
+
+## Next Steps (Optional)
+
+1. **Test message flow** - Confirm messages display on M5StickC
+2. **Re-enable encryption** (if needed):
+   - Generate new key in YAML
+   - Compile and flash
+   - Delete and re-add HA integration with new key
+3. **Update Home Assistant** to 2026.1.x to use latest ESPHome features
+
+## HA Access
+
+- **URL**: http://192.168.50.50:8123
+- **Token**: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiI1ODU3YjI5MDkyMDE0N2IwYjQzYjMzOTFmZGJlMjliOSIsImlhdCI6MTc2OTU0Njk0MiwiZXhwIjoyMDg0OTA2OTQyfQ.NIznc36woc6J0_L1HQFiwuvvdLVbjN3A3oBOzTDJfhU
+
+## Lesson Learned
+
+**Always check ESPHome/Home Assistant version compatibility!** The ESPHome API protocol (`aioesphomeapi`) must be compatible between the device firmware and Home Assistant's integration. Newer ESPHome versions may not work with older Home Assistant installations.
