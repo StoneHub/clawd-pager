@@ -11,7 +11,7 @@ $yamlPath = "/mnt/c/Users/monro/Codex/clawd-pager/clawd-pager.yaml"
 $cmd = "source ~/esphome-venv/bin/activate && esphome logs $yamlPath"
 
 if ($Mode -eq "usb") {
-    $cmd = "$cmd --device /dev/ttyUSB0"
+    $cmd = "$cmd --device /dev/ttyUSB1"
 }
 
 wsl bash -c "$cmd"

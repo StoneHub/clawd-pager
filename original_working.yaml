@@ -4,6 +4,7 @@ esphome:
   on_boot:
     then:
       - rtttl.play: "Startup:d=4,o=5,b=180:c,e,g,c6"
+      - light.turn_on: backlight
 
 esp32:
   board: m5stick-c
@@ -36,10 +37,24 @@ time:
     id: sntp_time
     timezone: "America/New_York"
 
+# Backlight Power (AXP192 management is usually handled by board def, but we control pin if direct)
+# M5StickC Plus backlight is GPIO27 inverted usually, or handled by PMIC. 
+# Standard config for simple control:
+light:
+  - platform: monochromatic
+    id: backlight
+    output: backlight_pwm
+    name: "Display Backlight"
+    restore_mode: ALWAYS_ON
+
 output:
   - platform: ledc
     id: buzzer_pwm
     pin: GPIO2
+  - platform: ledc
+    id: backlight_pwm
+    pin: GPIO27
+    inverted: true  # Often inverted on these boards
 
 rtttl:
   output: buzzer_pwm
@@ -84,9 +99,7 @@ display:
   - platform: st7789v
     id: my_display
     model: TTGO_TDisplay_135x240
-    backlight_pin:
-      number: GPIO27
-      inverted: true
+    # backlight_pin removed, handled by light component
     cs_pin: GPIO5
     dc_pin: GPIO23
     reset_pin: GPIO18

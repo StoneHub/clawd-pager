@@ -1,0 +1,81 @@
+# M5StickC Plus 1.1 - Minimal Working Configuration
+# Based on official M5Stack docs and martydingo/esphome-axp192
+#
+# KEY INSIGHT: The M5StickC Plus 1.1 controls the display backlight
+# via the AXP192 PMU, NOT via GPIO. This is different from TTGO TDisplay!
+
+esphome:
+  name: clawd-pager
+  friendly_name: "Clawd Pager"
+
+esp32:
+  board: m5stick-c
+  framework:
+    type: arduino
+
+# External component for AXP192 power management (controls backlight!)
+external_components:
+  - source: github://martydingo/esphome-axp192
+    components: [axp192]
+
+# I2C bus for AXP192
+i2c:
+  id: bus_a
+  sda: 21
+  scl: 22
+  scan: false
+
+# AXP192 Power Management - THIS ENABLES THE BACKLIGHT
+sensor:
+  - platform: axp192
+    model: M5STICKC
+    address: 0x34
+    i2c_id: bus_a
+    update_interval: 30s
+    battery_level:
+      name: "Battery Level"
+      id: battery_level
+
+# Logger for debugging
+logger:
+
+# WiFi - update with your credentials
+wifi:
+  ssid: "FlyingChanges"
+  password: "flyingchanges"
+  ap:
+    ssid: "Clawd-Pager-Fallback"
+    password: "clawd-recovery"
+
+captive_portal:
+
+# API for Home Assistant integration
+api:
+
+# OTA updates
+ota:
+  platform: esphome
+
+# Display Setup - NO backlight_pin needed, AXP192 handles it
+spi:
+  clk_pin: GPIO13
+  mosi_pin: GPIO15
+
+display:
+  - platform: st7789v
+    id: my_display
+    model: TTGO_TDisplay_135x240
+    cs_pin: GPIO5
+    dc_pin: GPIO23
+    reset_pin: GPIO18
+    rotation: 270
+    update_interval: 1s
+    lambda: |-
+      it.fill(Color(0, 0, 0));
+      it.print(120, 40, id(font_main), Color(0, 255, 255), TextAlign::CENTER, "CLAWD PAGER");
+      it.print(120, 80, id(font_main), Color(255, 255, 255), TextAlign::CENTER, "Screen Test OK!");
+
+font:
+  - file: "gfonts://Roboto"
+    id: font_main
+    size: 20
