@@ -35,6 +35,7 @@ wifi:
   ssid: "FlyingChanges"
   password: "flyingchanges"
   fast_connect: true
+  power_save_mode: none
 
 time:
   - platform: sntp
@@ -64,6 +65,11 @@ sensor:
       name: "Battery Level"
       id: battery_level
 
+  - platform: homeassistant
+    id: ha_sun
+    entity_id: sun.sun
+    internal: true
+
 text_sensor:
   - platform: homeassistant
     id: ha_message
@@ -84,6 +90,17 @@ binary_sensor:
             data:
               entity_id: input_text.clawd_status
               value: "Button B Pressed!"
+  - platform: gpio
+    pin: { number: GPIO37, inverted: true }
+    name: "Button A"
+    on_press:
+      then:
+        - rtttl.play: "Blip:d=32,o=6,b=100:c"
+        - homeassistant.service:
+            service: input_text.set_value
+            data:
+              entity_id: input_text.clawd_status
+              value: "Button A (M5) Pressed!"
 
 spi:
   clk_pin: GPIO13
@@ -114,8 +131,10 @@ display:
 
       if (id(ha_message).has_state()) {
         it.print(120, 3, id(font_small), color_green, TextAlign::TOP_CENTER, "SYNCED");
+      } else if (id(ha_sun).has_state()) {
+        it.print(120, 3, id(font_small), color_yellow, TextAlign::TOP_CENTER, "API OK");
       } else {
-        it.print(120, 3, id(font_small), color_yellow, TextAlign::TOP_CENTER, "WAITING");
+        it.print(120, 3, id(font_small), color_grey, TextAlign::TOP_CENTER, "WAITING");
       }
 
       it.printf(235, 3, id(font_small), color_cyan, TextAlign::TOP_RIGHT, "%.0f%%", id(battery_level).state);
