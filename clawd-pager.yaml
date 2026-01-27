@@ -1,0 +1,170 @@
+esphome:
+  name: clawd-pager
+  friendly_name: "Clawd Pager"
+  on_boot:
+    then:
+      - rtttl.play: "Startup:d=4,o=5,b=180:c,e,g,c6"
+      - light.turn_on: backlight
+
+esp32:
+  board: m5stick-c
+  framework:
+    type: arduino
+
+# Log via USB by default for debugging
+logger:
+
+# Enable Home Assistant API
+api:
+
+# Enable OTA updates
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: "FlyingChanges"
+  password: "flyingchanges"
+  fast_connect: true
+  
+  # Fallback AP
+  ap:
+    ssid: "Clawd-Pager-Fallback"
+    password: "clawd-recovery"
+
+# Time Source (Required for clock)
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: "America/New_York"
+
+# Backlight Power (AXP192 management is usually handled by board def, but we control pin if direct)
+# M5StickC Plus backlight is GPIO27 inverted usually, or handled by PMIC. 
+# Standard config for simple control:
+light:
+  - platform: monochromatic
+    id: backlight
+    output: backlight_pwm
+    name: "Display Backlight"
+    restore_mode: ALWAYS_ON
+
+output:
+  - platform: ledc
+    id: buzzer_pwm
+    pin: GPIO2
+  - platform: ledc
+    id: backlight_pwm
+    pin: GPIO27
+    inverted: true  # Often inverted on these boards
+
+rtttl:
+  output: buzzer_pwm
+  id: buzzer
+
+# Sensors
+sensor:
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    id: wifi_sig
+    update_interval: 10s
+
+text_sensor:
+  - platform: homeassistant
+    id: ha_status
+    entity_id: input_text.clawd_status
+    on_value:
+      then:
+        - rtttl.play: "Notify:d=4,o=6,b=200:c,e,g"
+        - component.update: my_display
+
+# Buttons
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO37
+      inverted: true
+    name: "Button A"
+    on_press:
+      then:
+        - rtttl.play: "Blip:d=32,o=7,b=100:c"
+        - component.update: my_display
+
+# Display Setup
+spi:
+  clk_pin: GPIO13
+  mosi_pin: GPIO15
+
+captive_portal:
+
+display:
+  - platform: st7789v
+    id: my_display
+    model: TTGO_TDisplay_135x240
+    # backlight_pin removed, handled by light component
+    cs_pin: GPIO5
+    dc_pin: GPIO23
+    reset_pin: GPIO18
+    rotation: 270
+    update_interval: 1s # Faster update for clock
+    lambda: |-
+      // --- COLOR PALETTE ---
+      Color c_bg = Color(0, 0, 0);          // Black
+      Color c_header = Color(0, 255, 255);  // Cyan
+      Color c_text = Color(255, 255, 255);  // White
+      Color c_accent = Color(255, 0, 128);  // Magenta
+      Color c_warn = Color(255, 200, 0);    // Orange/Yellow
+
+      // --- STATIC LAYOUT ---
+      it.fill(c_bg);
+      
+      // Top Bar (Status)
+      it.line(0, 20, 240, 20, c_header);
+      
+      // Time
+      if (id(sntp_time).now().is_valid()) {
+        auto time = id(sntp_time).now();
+        it.strftime(5, 3, id(font_small), c_header, TextAlign::TOP_LEFT, "%H:%M", time);
+      } else {
+        it.print(5, 3, id(font_small), c_warn, TextAlign::TOP_LEFT, "--:--");
+      }
+
+      // WiFi Icon (Simple Bars)
+      int rssi = id(wifi_sig).state;
+      int bars = 0;
+      if (rssi > -50) bars = 4;
+      else if (rssi > -65) bars = 3;
+      else if (rssi > -75) bars = 2;
+      else if (rssi > -90) bars = 1;
+
+      int x_wifi = 230;
+      int y_wifi = 15;
+      for (int i = 0; i < 4; i++) {
+        Color bar_color = (i < bars) ? c_header : Color(50, 50, 50);
+        it.filled_rectangle(x_wifi - (i * 4), y_wifi - (i * 3), 3, (i * 3) + 2, bar_color);
+      }
+
+      // --- MAIN CONTENT ---
+      if (id(ha_status).has_state()) {
+        // Draw a fancy border box
+        it.rectangle(0, 25, 240, 110, c_accent);
+        
+        // Message
+        it.print(120, 75, id(font_body), c_text, TextAlign::CENTER, id(ha_status).state.c_str());
+        
+      } else {
+        it.print(120, 75, id(font_body), c_warn, TextAlign::CENTER, "WAITING...");
+        
+        // Scanning Animation (Simple horizontal moving line)
+        int scan_x = (millis() / 10) % 240;
+        it.line(scan_x, 130, scan_x + 20, 130, c_accent);
+      }
+
+font:
+  - file: "gfonts://Orbitron"
+    id: font_header
+    size: 20
+  - file: "gfonts://Roboto"
+    id: font_body
+    size: 28
+  - file: "gfonts://Roboto Mono"
+    id: font_small
+    size: 16
