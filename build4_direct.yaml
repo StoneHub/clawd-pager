@@ -1,0 +1,270 @@
+esphome:
+  name: clawd-pager
+  friendly_name: "Clawd Pager"
+  on_boot:
+    priority: -10
+    then:
+      - rtttl.play: "Startup:d=4,o=5,b=180:c,e,g,c6"
+
+esp32:
+  board: m5stick-c
+  framework:
+    type: arduino
+
+external_components:
+  - source: github://martydingo/esphome-axp192
+    components: [axp192]
+
+i2c:
+  sda: 21
+  scl: 22
+
+logger:
+  level: DEBUG
+
+api:
+  services:
+    - service: alert
+      variables:
+        my_text: string
+      then:
+        - rtttl.play: "Alert:d=16,o=6,b=180:c,e,g"
+        - text_sensor.template.publish:
+            id: pager_display
+            state: !lambda "return my_text;"
+    - service: update_weather
+      variables:
+        weather: string
+      then:
+        - text_sensor.template.publish:
+            id: weather_display
+            state: !lambda "return weather;"
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: "FlyingChanges"
+  password: "flyingchanges"
+  fast_connect: true
+  power_save_mode: none
+
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: "EST5EDT,M3.2.0,M11.1.0"
+    on_time:
+      - seconds: 0
+        minutes: /5
+        then:
+          - lambda: |-
+              auto time = id(sntp_time).now();
+              int hour = time.hour;
+              // Night mode: 8 PM - 7 AM (dim to 20%)
+              if (hour >= 20 || hour < 7) {
+                auto call = id(backlight_light).make_call();
+                call.set_brightness(0.2);
+                call.perform();
+              } else {
+                auto call = id(backlight_light).make_call();
+                call.set_brightness(1.0);
+                call.perform();
+              }
+
+output:
+  - platform: ledc
+    id: buzzer_pwm
+    pin: GPIO2
+  - platform: ledc
+    id: backlight_output
+    pin: GPIO32
+    frequency: 1000Hz
+
+light:
+  - platform: monochromatic
+    id: backlight_light
+    output: backlight_output
+    restore_mode: ALWAYS_ON
+
+rtttl:
+  output: buzzer_pwm
+  id: buzzer
+
+i2s_audio:
+  i2s_lrclk_pin: GPIO0
+
+microphone:
+  - platform: i2s_audio
+    id: ptt_mic
+    i2s_din_pin: GPIO34
+    pdm: true
+    adc_type: external
+
+sensor:
+  - platform: axp192
+    model: M5STICKC
+    address: 0x34
+    id: my_axp
+    battery_level:
+      name: "Battery"
+      id: battery_level
+
+text_sensor:
+  - platform: template
+    id: pager_display
+    name: "Pager Display"
+  - platform: template
+    id: weather_display
+    name: "Weather Display"
+
+globals:
+  - id: pulse_state
+    type: bool
+    initial_value: 'false'
+  - id: is_recording
+    type: bool
+    initial_value: 'false'
+  - id: screen_on
+    type: bool
+    initial_value: 'true'
+
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO39
+      inverted: true
+    name: "Button B"
+    on_press:
+      then:
+        - rtttl.play: "Blip:d=32,o=6,b=150:g"
+        - globals.set:
+            id: is_recording
+            value: 'true'
+        - text_sensor.template.publish:
+            id: pager_display
+            state: "LISTENING..."
+    on_release:
+      then:
+        - rtttl.play: "Blip:d=32,o=6,b=150:c"
+        - globals.set:
+            id: is_recording
+            value: 'false'
+        - text_sensor.template.publish:
+            id: pager_display
+            state: "PROCESSING..."
+  
+  - platform: gpio
+    pin:
+      number: GPIO37
+      inverted: true
+    name: "Button A"
+    on_press:
+      then:
+        - rtttl.play: "Blip:d=32,o=6,b=150:c6"
+  
+  - platform: gpio
+    pin:
+      number: GPIO35
+      inverted: true
+    name: "Power Button"
+    on_click:
+      then:
+        - lambda: |-
+            id(screen_on) = !id(screen_on);
+            if (id(screen_on)) {
+              auto call = id(backlight_light).turn_on();
+              call.perform();
+            } else {
+              auto call = id(backlight_light).turn_off();
+              call.perform();
+            }
+
+spi:
+  clk_pin: GPIO13
+  mosi_pin: GPIO15
+
+display:
+  - platform: st7789v
+    model: TTGO_TDisplay_135x240
+    cs_pin: GPIO5
+    dc_pin: GPIO23
+    reset_pin: GPIO18
+    rotation: 270
+    update_interval: 0.5s
+    lambda: |-
+      if (!id(screen_on)) {
+        it.fill(Color::BLACK);
+        return;
+      }
+      
+      it.fill(Color::BLACK);
+      id(pulse_state) = !id(pulse_state);
+
+      std::string msg = id(pager_display).state;
+      
+      if (id(is_recording)) {
+          // Listening Screen
+          it.print(120, 35, id(font_body), Color::WHITE, TextAlign::CENTER, "LISTENING...");
+          it.print(120, 110, id(font_small), Color::WHITE, TextAlign::CENTER, "(Release to end)");
+          
+          for (int i=0; i<10; i++) {
+            int h = (id(pulse_state) ? (i*2) : (20-i*2));
+            it.line(70+i*10, 75-h, 70+i*10, 75+h, Color::WHITE);
+          }
+      } else if (msg == "Clawd Pager" || msg == "" || msg == "Initializing...") {
+          // Large Clock
+          it.strftime(120, 50, id(font_large), Color::WHITE, TextAlign::CENTER, "%H:%M", id(sntp_time).now());
+          
+          std::string weather = id(weather_display).state;
+          if (!weather.empty()) {
+            it.line(60, 75, 180, 75, Color::WHITE);
+            it.print(120, 95, id(font_small), Color::WHITE, TextAlign::CENTER, weather.c_str());
+          }
+
+          if (id(battery_level).has_state()) {
+            int batt = (int)id(battery_level).state;
+            it.printf(120, 125, id(font_small), Color::WHITE, TextAlign::CENTER, "CLAWDBOT | %d%%", batt);
+          }
+      } else {
+          // Clean Multi-line Response
+          it.line(0, 22, 240, 22, Color::WHITE);
+          it.print(5, 4, id(font_small), Color::WHITE, TextAlign::TOP_LEFT, "CLAWDBOT DIRECT");
+          
+          std::string clean_msg = "";
+          for (char c : msg) {
+            if (c == '\n' || (c >= 32 && c <= 126)) clean_msg += c;
+          }
+
+          std::vector<std::string> lines;
+          size_t start = 0, end;
+          while ((end = clean_msg.find('\n', start)) != std::string::npos) {
+              lines.push_back(clean_msg.substr(start, end - start));
+              start = end + 1;
+          }
+          lines.push_back(clean_msg.substr(start));
+
+          int y = (lines.size() > 2) ? 40 : 65;
+          for (const auto& line : lines) {
+              if (line.empty()) continue;
+              it.print(120, y, id(font_body), Color::WHITE, TextAlign::CENTER, line.c_str());
+              y += 22;
+          }
+      }
+      
+      // Top Pulse
+      if (id(pulse_state)) {
+        it.line(118, 10, 122, 10, Color::WHITE);
+        it.line(118, 11, 122, 11, Color::WHITE);
+        it.line(118, 12, 122, 12, Color::WHITE);
+      }
+
+font:
+  - file: "gfonts://Roboto Mono"
+    id: font_large
+    size: 42
+  - file: "gfonts://Roboto Mono"
+    id: font_body
+    size: 16
+  - file: "gfonts://Roboto Mono"
+    id: font_small
+    size: 10

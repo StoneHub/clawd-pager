@@ -504,6 +504,9 @@
                 if (event.data.button === 'A') buttonA.textContent = 'OFF';
                 if (event.data.button === 'B') buttonB.textContent = 'OFF';
             }
+            if (event.event_type === 'BATTERY_UPDATE' && event.data) {
+                if (event.data.level !== undefined) batteryLevel.textContent = `${event.data.level}%`;
+            }
         }
 
         function updateState(state) {

@@ -1,0 +1,101 @@
+esphome:
+  name: clawd-pager
+  friendly_name: "Clawd Pager"
+
+esp32:
+  board: m5stick-c
+  framework:
+    type: arduino
+
+external_components:
+  - source: github://martydingo/esphome-axp192
+    components: [axp192]
+
+i2c:
+  sda: 21
+  scl: 22
+
+logger:
+  level: DEBUG
+
+api:
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: "FlyingChanges"
+  password: "flyingchanges"
+  fast_connect: true
+  power_save_mode: none
+
+spi:
+  clk_pin: GPIO13
+  mosi_pin: GPIO15
+
+sensor:
+  - platform: axp192
+    model: M5STICKC
+    address: 0x34
+    battery_level:
+      name: "Battery"
+      id: battery_level
+
+text_sensor:
+  - platform: homeassistant
+    id: ha_message
+    entity_id: input_text.clawd_status
+
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO39
+      inverted: true
+    name: "Button B"
+    on_press:
+      then:
+        - homeassistant.service:
+            service: input_text.set_value
+            data:
+              entity_id: input_text.clawd_status
+              value: "NO"
+  - platform: gpio
+    pin:
+      number: GPIO37
+      inverted: true
+    name: "Button A"
+    on_press:
+      then:
+        - homeassistant.service:
+            service: input_text.set_value
+            data:
+              entity_id: input_text.clawd_status
+              value: "YES"
+
+display:
+  - platform: st7789v
+    model: TTGO_TDisplay_135x240
+    cs_pin: GPIO5
+    dc_pin: GPIO23
+    reset_pin: GPIO18
+    rotation: 270
+    lambda: |-
+      it.fill(Color::BLACK);
+      
+      // Sanitizing the string to remove potential non-ASCII emoji blocks
+      std::string msg = id(ha_message).state;
+      
+      // Center with safe padding (Shifted slightly right to fix cutoff)
+      it.print(120, 60, id(font_body), Color::WHITE, TextAlign::CENTER, msg.c_str());
+      
+      if (id(battery_level).has_state()) {
+        it.printf(235, 5, id(font_small), Color::WHITE, TextAlign::TOP_RIGHT, "%.0f%%", id(battery_level).state);
+      }
+
+font:
+  - file: "gfonts://Roboto Mono"
+    id: font_body
+    size: 16
+  - file: "gfonts://Roboto Mono"
+    id: font_small
+    size: 10

@@ -21,7 +21,8 @@ esp32:
     type: arduino
 
 external_components:
-  - source: github://martydingo/esphome-axp192
+  # Using makerwolf fork for charging detection support
+  - source: github://makerwolf/esphome-axp192
     components: [axp192]
 
 i2c:
@@ -132,6 +133,156 @@ sensor:
       name: "Battery"
       id: battery_level
 
+binary_sensor:
+  # Charging detection via template - polls AXP192 charging status
+  - platform: template
+    name: "Charging"
+    id: is_charging
+    lambda: |-
+      // Check if battery is charging by comparing voltage/current
+      // AXP192 reports charging when VBUS is present and battery < 100%
+      return id(battery_level).state < 99.0;
+    on_press:
+      then:
+        - lambda: |-
+            if (id(dev_mode)) {
+              id(event_seq)++;
+              ESP_LOGI("EVENT", "[%d] CHARGING_START", id(event_seq));
+            }
+        - if:
+            condition:
+              lambda: 'return id(display_mode).state == "IDLE";'
+            then:
+              - text_sensor.template.publish:
+                  id: display_mode
+                  state: "DOCKED"
+    on_release:
+      then:
+        - lambda: |-
+            if (id(dev_mode)) {
+              id(event_seq)++;
+              ESP_LOGI("EVENT", "[%d] CHARGING_STOP", id(event_seq));
+            }
+        - if:
+            condition:
+              lambda: 'return id(display_mode).state == "DOCKED";'
+            then:
+              - text_sensor.template.publish:
+                  id: display_mode
+                  state: "IDLE"
+
+  # Button A - Briefing / Sleep countdown
+  - platform: gpio
+    pin:
+      number: GPIO37
+      inverted: true
+    name: "Button A"
+    id: button_a
+    on_press:
+      then:
+        - rtttl.play: "Blip:d=32,o=6,b=150:c6"
+        - globals.set:
+            id: btn_a_pressed
+            value: 'true'
+        - script.execute: activity_watcher
+        - lambda: |-
+            if (id(dev_mode)) {
+              id(event_seq)++;
+              ESP_LOGI("EVENT", "[%d] BUTTON_A_PRESS | mode=%s", id(event_seq), id(display_mode).state.c_str());
+            }
+    on_release:
+      then:
+        - globals.set:
+            id: btn_a_pressed
+            value: 'false'
+        - lambda: |-
+            if (id(dev_mode)) {
+              id(event_seq)++;
+              ESP_LOGI("EVENT", "[%d] BUTTON_A_RELEASE", id(event_seq));
+            }
+
+  # Button B - Voice / Home
+  - platform: gpio
+    pin:
+      number: GPIO39
+      inverted: true
+    name: "Button B"
+    id: button_b
+    on_multi_click:
+      # Short tap (< 400ms) = Go home / Cancel
+      - timing:
+          - ON for at most 400ms
+          - OFF for at least 50ms
+        then:
+          - rtttl.play: "Back:d=32,o=5,b=150:c"
+          - lambda: |-
+              if (id(dev_mode)) {
+                id(event_seq)++;
+                ESP_LOGI("EVENT", "[%d] BUTTON_B_TAP | action=HOME", id(event_seq));
+              }
+          - text_sensor.template.publish:
+              id: display_mode
+              state: "IDLE"
+          - text_sensor.template.publish:
+              id: pager_display
+              state: "CLAWDBOT READY"
+          - script.execute: activity_watcher
+      # Long hold (> 400ms) = Voice recording
+      - timing:
+          - ON for at least 400ms
+        then:
+          - rtttl.play: "Voice:d=32,o=6,b=150:g,c7"
+          - globals.set:
+              id: btn_b_pressed
+              value: 'true'
+          - text_sensor.template.publish:
+              id: display_mode
+              state: "LISTENING"
+          - text_sensor.template.publish:
+              id: pager_display
+              state: "LISTENING..."
+          - script.execute: activity_watcher
+          - lambda: |-
+              if (id(dev_mode)) {
+                id(event_seq)++;
+                ESP_LOGI("EVENT", "[%d] BUTTON_B_HOLD | mode=LISTENING", id(event_seq));
+              }
+    on_release:
+      then:
+        - if:
+            condition:
+              lambda: 'return id(btn_b_pressed);'
+            then:
+              - rtttl.play: "Done:d=32,o=6,b=150:c"
+              - globals.set:
+                  id: btn_b_pressed
+                  value: 'false'
+              - text_sensor.template.publish:
+                  id: display_mode
+                  state: "PROCESSING"
+              - text_sensor.template.publish:
+                  id: pager_display
+                  state: "PROCESSING..."
+              - lambda: |-
+                  if (id(dev_mode)) {
+                    id(event_seq)++;
+                    ESP_LOGI("EVENT", "[%d] BUTTON_B_RELEASE | mode=PROCESSING", id(event_seq));
+                  }
+
+  # Power Button - Toggle brightness
+  - platform: gpio
+    pin:
+      number: GPIO35
+      inverted: true
+    name: "Power Button"
+    on_click:
+      min_length: 50ms
+      max_length: 500ms
+      then:
+        - lambda: |-
+            id(screen_bright) = !id(screen_bright);
+            id(my_axp).set_brightness(id(screen_bright) ? 1.0 : 0.2);
+
 # Text sensors - exposed to bridge
 text_sensor:
   - platform: template
@@ -165,118 +316,6 @@ globals:
   - id: event_seq
     type: int
     initial_value: '0'
-
-# Buttons - exposed to bridge for state tracking
-binary_sensor:
-  - platform: gpio
-    pin:
-      number: GPIO37
-      inverted: true
-    name: "Button A"
-    id: button_a
-    on_press:
-      then:
-        - rtttl.play: "Blip:d=32,o=6,b=150:c6"
-        - globals.set:
-            id: btn_a_pressed
-            value: 'true'
-        - script.execute: activity_watcher
-        - lambda: |-
-            if (id(dev_mode)) {
-              id(event_seq)++;
-              ESP_LOGI("EVENT", "[%d] BUTTON_A_PRESS | mode=%s", id(event_seq), id(display_mode).state.c_str());
-            }
-    on_release:
-      then:
-        - globals.set:
-            id: btn_a_pressed
-            value: 'false'
-        - lambda: |-
-            if (id(dev_mode)) {
-              id(event_seq)++;
-              ESP_LOGI("EVENT", "[%d] BUTTON_A_RELEASE", id(event_seq));
-            }
-
-  - platform: gpio
-    pin:
-      number: GPIO39
-      inverted: true
-    name: "Button B"
-    id: button_b
-    on_multi_click:
-      # Short tap (< 400ms) = Go home / Cancel
-      - timing:
-          - ON for at most 400ms
-          - OFF for at least 50ms
-        then:
-          - rtttl.play: "Back:d=32,o=5,b=150:c"  # Lower tone for "back"
-          - lambda: |-
-              if (id(dev_mode)) {
-                id(event_seq)++;
-                ESP_LOGI("EVENT", "[%d] BUTTON_B_TAP | action=HOME", id(event_seq));
-              }
-          - text_sensor.template.publish:
-              id: display_mode
-              state: "IDLE"
-          - text_sensor.template.publish:
-              id: pager_display
-              state: "CLAWDBOT READY"
-          - script.execute: activity_watcher
-      # Long hold (> 400ms) = Voice recording
-      - timing:
-          - ON for at least 400ms
-        then:
-          - rtttl.play: "Voice:d=32,o=6,b=150:g,c7"  # Higher ascending tone for "voice"
-          - globals.set:
-              id: btn_b_pressed
-              value: 'true'
-          - text_sensor.template.publish:
-              id: display_mode
-              state: "LISTENING"
-          - text_sensor.template.publish:
-              id: pager_display
-              state: "LISTENING..."
-          - script.execute: activity_watcher
-          - lambda: |-
-              if (id(dev_mode)) {
-                id(event_seq)++;
-                ESP_LOGI("EVENT", "[%d] BUTTON_B_HOLD | mode=LISTENING", id(event_seq));
-              }
-    on_release:
-      then:
-        - if:
-            condition:
-              lambda: 'return id(btn_b_pressed);'
-            then:
-              # Only process if we were in voice mode
-              - rtttl.play: "Done:d=32,o=6,b=150:c"
-              - globals.set:
-                  id: btn_b_pressed
-                  value: 'false'
-              - text_sensor.template.publish:
-                  id: display_mode
-                  state: "PROCESSING"
-              - text_sensor.template.publish:
-                  id: pager_display
-                  state: "PROCESSING..."
-              - lambda: |-
-                  if (id(dev_mode)) {
-                    id(event_seq)++;
-                    ESP_LOGI("EVENT", "[%d] BUTTON_B_RELEASE | mode=PROCESSING", id(event_seq));
-                  }
-  
-  - platform: gpio
-    pin:
-      number: GPIO35
-      inverted: true
-    name: "Power Button"
-    on_click:
-      min_length: 50ms
-      max_length: 500ms
-      then:
-        - lambda: |-
-            id(screen_bright) = !id(screen_bright);
-            id(my_axp).set_brightness(id(screen_bright) ? 1.0 : 0.2);
 
 script:
   - id: activity_watcher
@@ -371,6 +410,85 @@ display:
           if (id(pulse_state)) {
             it.filled_circle(120, 95, 4, PURPLE);
           }
+          return;
+      }
+
+      // === DOCKED MODE - Ambient display when charging ===
+      if (mode == "DOCKED") {
+          // Dark ambient background with floating particles
+          int slow_frame = (millis() / 200) % 100;
+
+          // Orbiting particles around center
+          for (int i = 0; i < 6; i++) {
+            float angle = (i * 60 + slow_frame * 3.6) * 3.14159 / 180;
+            int radius = 35 + (i % 2) * 15;
+            int x = 120 + cos(angle) * radius;
+            int y = 68 + sin(angle) * (radius / 2);  // Elliptical orbit
+            Color particle_color = (i % 3 == 0) ? CYAN : ((i % 3 == 1) ? PURPLE : PINK);
+            int size = 2 + (slow_frame + i * 16) % 3;
+            it.filled_circle(x, y, size, particle_color);
+          }
+
+          // Gentle clock in center
+          it.strftime(120, 50, id(font_large), CYAN, TextAlign::CENTER, "%H:%M", id(sntp_time).now());
+
+          // Subtle "DOCKED" indicator
+          it.print(120, 95, id(font_small), DIM, TextAlign::CENTER, "DOCKED");
+
+          // Charging indicator - animated lightning bolt effect
+          int bolt_y = 115 + (slow_frame % 10 < 5 ? 0 : 2);
+          it.print(110, bolt_y, id(font_small), LIME, TextAlign::CENTER, "++");
+
+          // Battery with fill animation
+          if (id(battery_level).has_state()) {
+            float batt = id(battery_level).state;
+            int fill = (int)(batt / 100.0 * 30) + (slow_frame % 5);
+            if (fill > 30) fill = 30;
+            it.rectangle(105, 125, 30, 8, LIME);
+            it.filled_rectangle(105, 125, fill, 8, LIME);
+            it.printf(140, 125, id(font_small), LIME, "%.0f%%", batt);
+          }
+          return;
+      }
+
+      // === AGENT MODE - Claude Code is working ===
+      if (mode == "AGENT") {
+          int code_frame = (millis() / 80) % 40;  // Fast animation
+
+          // Matrix-style falling code effect
+          for (int col = 0; col < 12; col++) {
+            int offset = (col * 7 + code_frame * 3) % 40;
+            for (int row = 0; row < 6; row++) {
+              int y = (row * 22 + offset) % 135;
+              int brightness = 255 - (row * 40);
+              if (brightness < 50) brightness = 50;
+              Color code_color = Color(0, brightness, brightness / 2);
+              // Random "characters" (just rectangles of varying sizes)
+              int char_w = 3 + ((col + row + code_frame) % 4);
+              it.filled_rectangle(20 + col * 18, y, char_w, 8, code_color);
+            }
+          }
+
+          // Agent status overlay
+          it.filled_rectangle(40, 45, 160, 50, Color(0, 0, 0));
+          it.rectangle(40, 45, 160, 50, CYAN);
+
+          // Show what's happening
+          it.print(120, 55, id(font_body), CYAN, TextAlign::CENTER, "AGENT ACTIVE");
+
+          // Tool name from display text
+          if (!msg.empty() && msg != "CLAWDBOT READY") {
+            std::string tool_display = msg.substr(0, 18);
+            it.print(120, 78, id(font_small), LIME, TextAlign::CENTER, tool_display.c_str());
+          } else {
+            it.print(120, 78, id(font_small), DIM, TextAlign::CENTER, "Working...");
+          }
+
+          // Spinning indicator in corner
+          int spin = code_frame % 8;
+          const char* spinner[] = {"|", "/", "-", "\\", "|", "/", "-", "\\"};
+          it.print(215, 5, id(font_body), CYAN, TextAlign::TOP_RIGHT, spinner[spin]);
+
           return;
       }
 

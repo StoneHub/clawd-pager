@@ -1,0 +1,15 @@
+[Unit]
+Description=Clawd Pager Development Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=monroe
+WorkingDirectory=/home/monroe/clawd/work/clawd-pager
+Environment="PATH=/home/monroe/clawd/esphome-env/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/home/monroe/clawd/esphome-env/bin/python -m devtools.dashboard_server
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

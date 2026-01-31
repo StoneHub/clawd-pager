@@ -172,6 +172,35 @@ class DashboardServer:
 
             event = self.event_logger.log(source, event_type, event_data)
 
+            # Update device state based on event type
+            if event_type == "BATTERY_UPDATE":
+                self.update_device_state(battery_level=event_data.get('level', 0))
+            elif event_type == "DISPLAY_UPDATE":
+                self.update_device_state(
+                    display_mode=event_data.get('mode', ''),
+                    display_text=event_data.get('text', '')
+                )
+            elif event_type == "BUTTON_PRESS":
+                btn = event_data.get('button', '')
+                if btn == 'A':
+                    self.update_device_state(button_a=True)
+                elif btn == 'B':
+                    self.update_device_state(button_b=True)
+            elif event_type == "BUTTON_RELEASE":
+                btn = event_data.get('button', '')
+                if btn == 'A':
+                    self.update_device_state(button_a=False)
+                elif btn == 'B':
+                    self.update_device_state(button_b=False)
+            elif event_type == "AGENT_WORKING":
+                # Claude Code is using a tool - could update pager to show activity
+                status = event_data.get('status', '')
+                tool = event_data.get('tool', 'unknown')
+                logger.info(f"Agent: {tool} {status}")
+            elif event_type == "AGENT_WAITING":
+                # Claude Code finished and waiting for user
+                logger.info("Agent: waiting for user input")
+
             # Broadcast to connected dashboards
             await self.broadcast_event(event)
 

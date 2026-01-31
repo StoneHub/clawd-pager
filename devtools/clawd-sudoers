@@ -1,0 +1,21 @@
+# Sudoers rules for Clawd Pager services
+# Install with: sudo cp clawd-sudoers /etc/sudoers.d/clawd && sudo chmod 440 /etc/sudoers.d/clawd
+
+# Allow monroe to manage clawd services without password
+monroe ALL=(ALL) NOPASSWD: /usr/bin/systemctl start clawd-dashboard
+monroe ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop clawd-dashboard
+monroe ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart clawd-dashboard
+monroe ALL=(ALL) NOPASSWD: /usr/bin/systemctl status clawd-dashboard
+monroe ALL=(ALL) NOPASSWD: /usr/bin/systemctl enable clawd-dashboard
+monroe ALL=(ALL) NOPASSWD: /usr/bin/systemctl disable clawd-dashboard
+
+monroe ALL=(ALL) NOPASSWD: /usr/bin/systemctl start clawd-bridge
+monroe ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop clawd-bridge
+monroe ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart clawd-bridge
+monroe ALL=(ALL) NOPASSWD: /usr/bin/systemctl status clawd-bridge
+monroe ALL=(ALL) NOPASSWD: /usr/bin/systemctl enable clawd-bridge
+monroe ALL=(ALL) NOPASSWD: /usr/bin/systemctl disable clawd-bridge
+
+# Allow viewing journal logs for clawd services
+monroe ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u clawd-dashboard*
+monroe ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u clawd-bridge*

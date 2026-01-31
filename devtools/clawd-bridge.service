@@ -1,0 +1,17 @@
+[Unit]
+Description=Clawd Pager Bridge - ESPHome API Connection
+After=network.target clawd-dashboard.service
+Wants=clawd-dashboard.service
+
+[Service]
+Type=simple
+User=monroe
+WorkingDirectory=/home/monroe/clawd/scripts
+Environment="PATH=/home/monroe/clawd/esphome-env/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=/home/monroe/clawd/work/clawd-pager"
+ExecStart=/home/monroe/clawd/esphome-env/bin/python bridge.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
