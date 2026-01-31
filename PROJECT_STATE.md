@@ -1,157 +1,124 @@
 # Clawd Pager - Project State
 
-**Last Updated**: 2026-01-27 17:50 EST
+**Last Updated**: 2026-01-31 16:30 EST
 
-## ✅ WORKING - Integration Successful!
+## [V4.0] Observable Development & Colorful UI (LIVE)
 
-**Status**: Device successfully connected to Home Assistant with 1 device and 4 entities showing!
+**Status**: Major iteration loop improvements + colorful animated display
 
-## Root Cause - VERSION MISMATCH (SOLVED)
+### What's New Today (2026-01-31):
 
-### The Real Problem
+1. **Development Dashboard** - Web UI at `http://192.168.50.50:8080`
+   - Real-time event stream (button presses, mode changes)
+   - Session recording with notes
+   - Build/Upload buttons for OTA deployment
+   - Device state monitoring
 
-**ESPHome version incompatibility with Home Assistant!**
+2. **Event Logging System** - SQLite-based persistence
+   - All events timestamped and stored in `~/.clawd/pager_events.db`
+   - Queryable history for debugging
+   - Session replay capability
 
-- **Home Assistant**: 2025.1.4 with `aioesphomeapi==28.0.0`
-- **ESPHome (initial)**: 2026.1.2 with `aioesphomeapi==43.13.0`
-- **Problem**: Protocol mismatch caused "Marker byte invalid: 0" errors and handshake timeouts
+3. **Colorful Animated Display** - Steve Jobs approved
+   - **LISTENING**: Teal header + cyan bouncing waveform bars
+   - **PROCESSING**: Amber spinning dots animation
+   - **AWAITING**: Purple pulsing concentric circles
+   - **ALERT**: Flashing red/orange header
+   - **IDLE**: Clean with cyan accents, colored battery indicator
+   - **RESPONSE**: Coral accent header bar
 
-### The Solution
+4. **Button Behavior Improved**
+   - **Button B tap** (< 400ms) = Go home/cancel (lower tone)
+   - **Button B hold** (> 400ms) = Voice recording (ascending tone)
+   - **Button A tap** = Briefing (stays on screen 5 seconds now!)
+   - **Button A hold** = Sleep countdown
 
-**Downgraded ESPHome to 2024.12.4** to match Home Assistant's API protocol version:
+5. **Bridge v4.0** - Event logging integration
+   - All button/display/audio events logged
+   - Integrated with dashboard for real-time monitoring
+   - Removed Telegram dependency for voice (TODO: local processing)
+
+### Files Created:
+- `devtools/` - Development tooling directory
+  - `event_logger.py` - SQLite event persistence
+  - `session_manager.py` - Recording/replay
+  - `dashboard_server.py` - WebSocket server
+  - `dashboard_ui/index.html` - Web dashboard
+- `dev.ps1` - Unified build commands (compile/upload/watch/dashboard)
+- `CLAUDE.md` - AI assistant context documentation
+
+### Known Issues:
+- Voice recognition accuracy needs improvement (Whisper base model)
+- Session recording export needs testing
+- Agent activity animations not yet implemented
+
+---
+
+## Quick Start
 
 ```bash
+# Start dashboard (on Pi)
+cd /home/monroe/clawd/work/clawd-pager
 source /home/monroe/clawd/esphome-env/bin/activate
-pip install esphome==2024.12.4  # Uses aioesphomeapi==24.6.2
-esphome clean clawd-pager.yaml
+python -m devtools.dashboard_server
+
+# Start bridge (separate terminal)
+cd /home/monroe/clawd/scripts
+python bridge.py
+
+# Deploy new firmware
 esphome compile clawd-pager.yaml
 esphome upload clawd-pager.yaml --device 192.168.50.85
 ```
 
-Then in Home Assistant:
-1. Delete ESPHome integration
-2. Re-add: Settings → Devices & Services → + Add Integration → ESPHome
-3. Host: `192.168.50.85`, Port: `6053`, No encryption key
-4. **SUCCESS**: 1 device, 4 entities appear!
+Or use the dashboard's Build & Deploy buttons!
 
-## Current Configuration
+---
 
-### Versions (WORKING)
-- **ESPHome**: 2024.12.4
-- **aioesphomeapi**: 24.6.2
-- **Home Assistant**: 2025.1.4
-- **Framework**: Arduino + ESP-IDF
-- **Build**: 2026-01-27 17:45 EST
+## Previous Versions
 
-### API Configuration
-```yaml
-api:
-  # Encryption disabled for compatibility testing
-  # key: "fyJkdxgmn1RZ9UqRQQWw++0Wks2mK+nMQ7RybTuwK+U="
-```
+### [V3.0] Hero UI & Direct Link
+- Large digital clock, battery bar, weather widget
+- Direct API control via aioesphomeapi
+- Voice pipeline with Whisper fallback
 
-### WiFi
-- **SSID**: FlyingChanges
-- **Password**: flyingchanges
-- **IP**: 192.168.50.85
-- **Power Save**: `none` (CRITICAL - prevents disconnects)
+### [V2.0] Stabilization
+- Removed CPU-heavy "floaty text" physics
+- Fixed AXP192 backlight control
+- WiFi power save disabled
 
-### Home Assistant Entities
-- **Status Input**: `input_text.clawd_status` (main message display)
-- **Diagnostic**: `sun.sun` (API connection test)
-- **Entities Exposed**: WiFi Signal, Battery Level, Button A, Button B
+### [V1.0] Initial
+- Basic ESPHome firmware
+- Home Assistant integration
 
-## Hardware Specs
+---
 
-| Component | Details |
-| --------- | ------- |
-| **Board** | M5StickC Plus 1.1 (ESP32-PICO-D4) |
-| **Display** | ST7789V2 1.14" TFT LCD (240x135, rotated 270°) |
-| **Power Management** | AXP192 PMIC (I2C: SDA=21, SCL=22, Addr=0x34) |
-| **Button A** | GPIO37 |
-| **Button B** | GPIO39 |
-| **Buzzer** | GPIO2 (passive, RTTTL compatible) |
-| **USB Chip** | FTDI FT230X (VID:PID = 0403:6001) |
+## Configuration
 
-**CRITICAL**: M5StickC Plus 1.1 uses AXP192 for backlight control (not GPIO)!
+| Setting | Value |
+|---------|-------|
+| **Device IP** | 192.168.50.85 |
+| **ESPHome** | 2024.12.4 (DO NOT UPGRADE) |
+| **Dashboard** | http://192.168.50.50:8080 |
+| **WiFi** | FlyingChanges / flyingchanges |
+| **Power Save** | none (CRITICAL) |
 
-## Testing Message Flow
+## Hardware
 
-Send test message from Home Assistant:
-```yaml
-# Developer Tools → Actions
-service: input_text.set_value
-data:
-  entity_id: input_text.clawd_status
-  value: "Test Message!"
-```
+| Component | Pin/Address |
+|-----------|-------------|
+| Button A | GPIO37 |
+| Button B | GPIO39 |
+| Power Button | GPIO35 |
+| Buzzer | GPIO2 |
+| Display | ST7789V SPI |
+| AXP192 | I2C 0x34 |
 
-Expected behavior:
-- M5StickC beeps (RTTTL tone)
-- Screen shows "SYNCED" (green) at top
-- Message displays in center
-- Battery % and WiFi signal shown
+---
 
-## Development Workflow
+## Next Steps
 
-```bash
-# Activate environment
-source /home/monroe/clawd/esphome-env/bin/activate
-
-# Compile
-esphome compile clawd-pager.yaml
-
-# Upload via OTA
-esphome upload clawd-pager.yaml --device 192.168.50.85
-
-# View logs
-esphome logs clawd-pager.yaml --device 192.168.50.85
-```
-
-## Troubleshooting History
-
-### Issues Encountered & Resolved
-
-1. **Black Screen** → Fixed with AXP192 component for backlight
-2. **WiFi Disconnects** → Fixed with `power_save_mode: none`
-3. **Encryption Key Mismatch** → Initially suspected, but was red herring
-4. **"Marker byte invalid: 0" errors** → **ROOT CAUSE: Version mismatch**
-5. **"No devices or entities"** → Fixed by downgrading ESPHome to 2024.12.4
-
-### What Didn't Work
-
-- Disabling encryption (wasn't the real issue)
-- Rebuilding firmware from scratch with same version
-- Restarting Home Assistant
-- USB flashing (didn't fix version mismatch)
-- Trying ESPHome 2025.12.7 (still too new, uses aioesphomeapi 43.2.1)
-
-### What Actually Fixed It
-
-**ESPHome 2024.12.4** - The key was matching the API protocol version to Home Assistant's expectations.
-
-## Version Compatibility Reference
-
-| Home Assistant | Compatible ESPHome | aioesphomeapi |
-|----------------|-------------------|---------------|
-| 2025.1.4       | 2024.12.4         | 24.6.2        |
-| 2025.1.4       | ❌ 2025.12.7      | 43.2.1 (too new) |
-| 2025.1.4       | ❌ 2026.1.2       | 43.13.0 (too new) |
-
-## Next Steps (Optional)
-
-1. **Test message flow** - Confirm messages display on M5StickC
-2. **Re-enable encryption** (if needed):
-   - Generate new key in YAML
-   - Compile and flash
-   - Delete and re-add HA integration with new key
-3. **Update Home Assistant** to 2026.1.x to use latest ESPHome features
-
-## HA Access
-
-- **URL**: http://192.168.50.50:8123
-- **Token**: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiI1ODU3YjI5MDkyMDE0N2IwYjQzYjMzOTFmZGJlMjliOSIsImlhdCI6MTc2OTU0Njk0MiwiZXhwIjoyMDg0OTA2OTQyfQ.NIznc36woc6J0_L1HQFiwuvvdLVbjN3A3oBOzTDJfhU
-
-## Lesson Learned
-
-**Always check ESPHome/Home Assistant version compatibility!** The ESPHome API protocol (`aioesphomeapi`) must be compatible between the device firmware and Home Assistant's integration. Newer ESPHome versions may not work with older Home Assistant installations.
+1. **Local voice processing** - Show response on pager, not Telegram
+2. **Agent activity display** - Show Claude Code activity on idle screen
+3. **Session summaries** - Aggregate interaction stats
+4. **Improve voice accuracy** - Larger Whisper model or better mic positioning

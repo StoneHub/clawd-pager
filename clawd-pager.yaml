@@ -5,6 +5,15 @@ esphome:
     priority: -10
     then:
       - rtttl.play: "Startup:d=4,o=5,b=180:c,e,g,c6"
+      - text_sensor.template.publish:
+          id: pager_display
+          state: "CLAWDBOT READY"
+      - text_sensor.template.publish:
+          id: display_mode
+          state: "IDLE"
+      - text_sensor.template.publish:
+          id: weather_display
+          state: ""
 
 esp32:
   board: m5stick-c
@@ -16,17 +25,80 @@ external_components:
     components: [axp192]
 
 i2c:
-  id: bus_a
   sda: 21
   scl: 22
-  scan: false
 
 logger:
   level: DEBUG
 
 api:
-  encryption:
-    key: "AoB3jpN0iVhstcEULCY9ESHY9WoArEH/4qFvlw2ckTs="
+  services:
+    # Main display update service - called by bridge
+    - service: set_display
+      variables:
+        my_text: string
+        my_mode: string
+      then:
+        - text_sensor.template.publish:
+            id: pager_display
+            state: !lambda "return my_text;"
+        - text_sensor.template.publish:
+            id: display_mode
+            state: !lambda "return my_mode;"
+        - if:
+            condition:
+              lambda: 'return my_mode != "SILENT";'
+            then:
+              - rtttl.play: "Blip:d=32,o=6,b=150:c6"
+        - script.execute: activity_watcher
+    
+    # Weather widget update
+    - service: update_weather
+      variables:
+        my_weather: string
+      then:
+        - text_sensor.template.publish:
+            id: weather_display
+            state: !lambda "return my_weather;"
+    
+    # Alert with distinct tone
+    - service: alert
+      variables:
+        my_text: string
+      then:
+        - rtttl.play: "Alert:d=16,o=6,b=180:c,e,g,c7"
+        - text_sensor.template.publish:
+            id: pager_display
+            state: !lambda "return my_text;"
+        - text_sensor.template.publish:
+            id: display_mode
+            state: "ALERT"
+        - script.execute: activity_watcher
+        - lambda: |-
+            if (id(dev_mode)) {
+              id(event_seq)++;
+              ESP_LOGI("EVENT", "[%d] ALERT | text=%s", id(event_seq), my_text.c_str());
+            }
+
+    # Toggle development mode (verbose logging)
+    - service: set_dev_mode
+      variables:
+        enabled: bool
+      then:
+        - globals.set:
+            id: dev_mode
+            value: !lambda "return enabled;"
+        - lambda: |-
+            ESP_LOGI("EVENT", "DEV_MODE %s", enabled ? "ENABLED" : "DISABLED");
+
+    # Get current device state (for dashboard polling)
+    - service: get_state
+      then:
+        - lambda: |-
+            ESP_LOGI("STATE", "mode=%s battery=%.0f dev_mode=%s",
+                     id(display_mode).state.c_str(),
+                     id(battery_level).has_state() ? id(battery_level).state : 0.0,
+                     id(dev_mode) ? "true" : "false");
 
 ota:
   - platform: esphome
@@ -40,7 +112,7 @@ wifi:
 time:
   - platform: sntp
     id: sntp_time
-    timezone: "America/New_York"
+    timezone: "EST5EDT,M3.2.0,M11.1.0"
 
 output:
   - platform: ledc
@@ -52,55 +124,172 @@ rtttl:
   id: buzzer
 
 sensor:
-  - platform: wifi_signal
-    name: "WiFi Signal"
-    id: wifi_sig
-    update_interval: 10s
   - platform: axp192
     model: M5STICKC
     address: 0x34
-    i2c_id: bus_a
-    update_interval: 30s
+    id: my_axp
     battery_level:
-      name: "Battery Level"
+      name: "Battery"
       id: battery_level
 
-  - platform: homeassistant
-    id: ha_sun
-    entity_id: sun.sun
-    internal: true
-
+# Text sensors - exposed to bridge
 text_sensor:
-  - platform: homeassistant
-    id: ha_message
-    entity_id: input_text.clawd_status
-    on_value:
-      then:
-        - rtttl.play: "Notify:d=4,o=6,b=200:c,e,g"
+  - platform: template
+    id: pager_display
+    name: "Pager Display"
+  - platform: template
+    id: weather_display
+    name: "Weather Display"
+  - platform: template
+    id: display_mode
+    name: "Display Mode"
 
+globals:
+  - id: pulse_state
+    type: bool
+    initial_value: 'false'
+  - id: btn_a_pressed
+    type: bool
+    initial_value: 'false'
+  - id: btn_b_pressed
+    type: bool
+    initial_value: 'false'
+  - id: screen_bright
+    type: bool
+    initial_value: 'true'
+  # Development mode - enables verbose event logging
+  - id: dev_mode
+    type: bool
+    initial_value: 'true'
+  # Event sequence counter for ordering
+  - id: event_seq
+    type: int
+    initial_value: '0'
+
+# Buttons - exposed to bridge for state tracking
 binary_sensor:
   - platform: gpio
-    pin: { number: GPIO39, inverted: true }
-    name: "Button B"
-    on_press:
-      then:
-        - rtttl.play: "Blip:d=32,o=6,b=100:e"
-        - homeassistant.service:
-            service: input_text.set_value
-            data:
-              entity_id: input_text.clawd_status
-              value: "Button B Pressed!"
-  - platform: gpio
-    pin: { number: GPIO37, inverted: true }
+    pin:
+      number: GPIO37
+      inverted: true
     name: "Button A"
+    id: button_a
     on_press:
       then:
-        - rtttl.play: "Blip:d=32,o=6,b=100:c"
-        - homeassistant.service:
-            service: input_text.set_value
-            data:
-              entity_id: input_text.clawd_status
-              value: "Button A (M5) Pressed!"
+        - rtttl.play: "Blip:d=32,o=6,b=150:c6"
+        - globals.set:
+            id: btn_a_pressed
+            value: 'true'
+        - script.execute: activity_watcher
+        - lambda: |-
+            if (id(dev_mode)) {
+              id(event_seq)++;
+              ESP_LOGI("EVENT", "[%d] BUTTON_A_PRESS | mode=%s", id(event_seq), id(display_mode).state.c_str());
+            }
+    on_release:
+      then:
+        - globals.set:
+            id: btn_a_pressed
+            value: 'false'
+        - lambda: |-
+            if (id(dev_mode)) {
+              id(event_seq)++;
+              ESP_LOGI("EVENT", "[%d] BUTTON_A_RELEASE", id(event_seq));
+            }
+
+  - platform: gpio
+    pin:
+      number: GPIO39
+      inverted: true
+    name: "Button B"
+    id: button_b
+    on_multi_click:
+      # Short tap (< 400ms) = Go home / Cancel
+      - timing:
+          - ON for at most 400ms
+          - OFF for at least 50ms
+        then:
+          - rtttl.play: "Back:d=32,o=5,b=150:c"  # Lower tone for "back"
+          - lambda: |-
+              if (id(dev_mode)) {
+                id(event_seq)++;
+                ESP_LOGI("EVENT", "[%d] BUTTON_B_TAP | action=HOME", id(event_seq));
+              }
+          - text_sensor.template.publish:
+              id: display_mode
+              state: "IDLE"
+          - text_sensor.template.publish:
+              id: pager_display
+              state: "CLAWDBOT READY"
+          - script.execute: activity_watcher
+      # Long hold (> 400ms) = Voice recording
+      - timing:
+          - ON for at least 400ms
+        then:
+          - rtttl.play: "Voice:d=32,o=6,b=150:g,c7"  # Higher ascending tone for "voice"
+          - globals.set:
+              id: btn_b_pressed
+              value: 'true'
+          - text_sensor.template.publish:
+              id: display_mode
+              state: "LISTENING"
+          - text_sensor.template.publish:
+              id: pager_display
+              state: "LISTENING..."
+          - script.execute: activity_watcher
+          - lambda: |-
+              if (id(dev_mode)) {
+                id(event_seq)++;
+                ESP_LOGI("EVENT", "[%d] BUTTON_B_HOLD | mode=LISTENING", id(event_seq));
+              }
+    on_release:
+      then:
+        - if:
+            condition:
+              lambda: 'return id(btn_b_pressed);'
+            then:
+              # Only process if we were in voice mode
+              - rtttl.play: "Done:d=32,o=6,b=150:c"
+              - globals.set:
+                  id: btn_b_pressed
+                  value: 'false'
+              - text_sensor.template.publish:
+                  id: display_mode
+                  state: "PROCESSING"
+              - text_sensor.template.publish:
+                  id: pager_display
+                  state: "PROCESSING..."
+              - lambda: |-
+                  if (id(dev_mode)) {
+                    id(event_seq)++;
+                    ESP_LOGI("EVENT", "[%d] BUTTON_B_RELEASE | mode=PROCESSING", id(event_seq));
+                  }
+  
+  - platform: gpio
+    pin:
+      number: GPIO35
+      inverted: true
+    name: "Power Button"
+    on_click:
+      min_length: 50ms
+      max_length: 500ms
+      then:
+        - lambda: |-
+            id(screen_bright) = !id(screen_bright);
+            id(my_axp).set_brightness(id(screen_bright) ? 1.0 : 0.2);
+
+script:
+  - id: activity_watcher
+    mode: restart
+    then:
+      - lambda: |-
+          id(my_axp).set_brightness(1.0);
+      - delay: 30s
+      - lambda: |-
+          id(my_axp).set_brightness(0.4);
+      - delay: 30s
+      - lambda: |-
+          id(my_axp).set_brightness(0.1);
 
 spi:
   clk_pin: GPIO13
@@ -108,54 +297,192 @@ spi:
 
 display:
   - platform: st7789v
-    id: my_display
     model: TTGO_TDisplay_135x240
     cs_pin: GPIO5
     dc_pin: GPIO23
     reset_pin: GPIO18
     rotation: 270
-    update_interval: 1s
+    update_interval: 0.5s
     lambda: |-
-      auto color_cyan = Color(0x00FFFF);
-      auto color_green = Color(0x00FF00);
-      auto color_white = Color(0xFFFFFF);
-      auto color_grey = Color(0x333333);
-      auto color_yellow = Color(0xFFFF00);
+      // === COLOR PALETTE ===
+      Color CYAN = Color(0, 255, 255);
+      Color TEAL = Color(0, 200, 200);
+      Color CORAL = Color(255, 127, 80);
+      Color AMBER = Color(255, 191, 0);
+      Color LIME = Color(50, 205, 50);
+      Color PINK = Color(255, 105, 180);
+      Color PURPLE = Color(147, 112, 219);
+      Color RED = Color(255, 60, 60);
+      Color ORANGE = Color(255, 140, 0);
+      Color DIM = Color(100, 100, 100);
 
       it.fill(Color::BLACK);
-      it.line(0, 20, 240, 20, color_cyan);
-      
-      if (id(sntp_time).now().is_valid()) {
-        it.strftime(5, 3, id(font_small), color_cyan, TextAlign::TOP_LEFT, "%H:%M:%S", id(sntp_time).now());
+      id(pulse_state) = !id(pulse_state);
+      int frame = (millis() / 100) % 20;  // Animation frame
+
+      std::string mode = id(display_mode).state;
+      std::string msg = id(pager_display).state;
+
+      // === LISTENING MODE - Cyan waveform ===
+      if (mode == "LISTENING") {
+          // Gradient header bar
+          it.filled_rectangle(0, 0, 240, 25, TEAL);
+          it.print(120, 5, id(font_body), Color::BLACK, TextAlign::TOP_CENTER, "LISTENING");
+
+          // Animated audio waveform - bouncing bars
+          for (int i = 0; i < 12; i++) {
+            int phase = (frame + i * 2) % 20;
+            int h = 8 + abs(10 - phase) * 2;
+            Color bar_color = (i % 2 == 0) ? CYAN : TEAL;
+            it.filled_rectangle(30 + i * 16, 70 - h, 10, h * 2, bar_color);
+          }
+
+          it.print(120, 115, id(font_small), DIM, TextAlign::CENTER, "Release when done");
+          return;
       }
 
-      if (id(ha_message).has_state()) {
-        it.print(120, 3, id(font_small), color_green, TextAlign::TOP_CENTER, "SYNCED");
-      } else if (id(ha_sun).has_state()) {
-        it.print(120, 3, id(font_small), color_yellow, TextAlign::TOP_CENTER, "API OK");
-      } else {
-        it.print(120, 3, id(font_small), color_grey, TextAlign::TOP_CENTER, "WAITING");
+      // === PROCESSING MODE - Amber spinner ===
+      if (mode == "PROCESSING") {
+          it.print(120, 35, id(font_body), AMBER, TextAlign::CENTER, "PROCESSING");
+
+          // Spinning dots animation
+          for (int i = 0; i < 8; i++) {
+            float angle = (i * 45 + frame * 18) * 3.14159 / 180;
+            int x = 120 + cos(angle) * 25;
+            int y = 80 + sin(angle) * 25;
+            int size = (i == (frame % 8)) ? 6 : 3;
+            Color dot_color = (i == (frame % 8)) ? AMBER : ORANGE;
+            it.filled_circle(x, y, size, dot_color);
+          }
+
+          it.print(120, 115, id(font_small), DIM, TextAlign::CENTER, "Thinking...");
+          return;
       }
 
-      it.printf(235, 3, id(font_small), color_cyan, TextAlign::TOP_RIGHT, "%.0f%%", id(battery_level).state);
+      // === AWAITING MODE - Purple pulse ===
+      if (mode == "AWAITING") {
+          it.print(120, 35, id(font_body), PURPLE, TextAlign::CENTER, "AWAITING");
+          it.print(120, 55, id(font_body), PURPLE, TextAlign::CENTER, "RESPONSE");
 
-      if (id(ha_message).has_state()) {
-        it.print(120, 65, id(font_body), color_white, TextAlign::CENTER, id(ha_message).state.c_str());
-      } else {
-        it.print(120, 65, id(font_body), color_yellow, TextAlign::CENTER, "Connecting...");
+          // Pulsing concentric circles
+          int pulse_size = 5 + (frame % 10) * 2;
+          it.circle(120, 95, pulse_size, PURPLE);
+          it.circle(120, 95, pulse_size + 8, PINK);
+          if (id(pulse_state)) {
+            it.filled_circle(120, 95, 4, PURPLE);
+          }
+          return;
       }
 
-      it.line(0, 115, 240, 115, color_grey);
-      int rssi = id(wifi_sig).state;
-      it.printf(5, 120, id(font_small), color_grey, TextAlign::TOP_LEFT, "WIFI: %d dBm", rssi);
-      
-      float uptime = millis() / 1000.0;
-      it.printf(235, 120, id(font_small), color_grey, TextAlign::TOP_RIGHT, "%.0fs", uptime);
+      // === IDLE / HOME SCREEN - Clean with accent ===
+      if (mode == "IDLE" || msg == "CLAWDBOT READY" || msg.empty()) {
+          // Subtle top accent line
+          it.line(40, 8, 200, 8, TEAL);
+
+          // Large clock - white for readability
+          it.strftime(120, 45, id(font_large), Color::WHITE, TextAlign::CENTER, "%H:%M", id(sntp_time).now());
+
+          // Accent divider
+          it.line(60, 78, 180, 78, CYAN);
+
+          // Weather in teal if available
+          std::string weather = id(weather_display).state;
+          if (!weather.empty()) {
+            it.print(120, 92, id(font_body), TEAL, TextAlign::CENTER, weather.c_str());
+          }
+
+          // Bottom status bar
+          if (id(battery_level).has_state()) {
+            float batt = id(battery_level).state;
+            Color batt_color = (batt > 50) ? LIME : ((batt > 20) ? AMBER : RED);
+            it.printf(120, 120, id(font_small), batt_color, TextAlign::CENTER, "%.0f%%", batt);
+
+            // Battery bar
+            int bar_width = (batt / 100.0) * 40;
+            it.rectangle(100, 130, 40, 4, DIM);
+            it.filled_rectangle(100, 130, bar_width, 4, batt_color);
+          }
+
+          // Connection pulse - cyan
+          if (id(pulse_state)) {
+            it.filled_circle(120, 4, 2, CYAN);
+          }
+
+          // Lobster icon hint (small)
+          it.print(10, 120, id(font_small), CORAL, TextAlign::TOP_LEFT, ">");
+          return;
+      }
+
+      // === ALERT MODE - Red urgency ===
+      if (mode == "ALERT") {
+          // Flashing red header
+          Color header_color = id(pulse_state) ? RED : ORANGE;
+          it.filled_rectangle(0, 0, 240, 28, header_color);
+          it.print(120, 6, id(font_body), Color::WHITE, TextAlign::TOP_CENTER, "! ALERT !");
+
+          // Message in white on dark
+          std::string clean_msg = "";
+          for (char c : msg) {
+            if (c == '\n' || (c >= 32 && c <= 126)) clean_msg += c;
+          }
+
+          std::vector<std::string> lines;
+          size_t start = 0, end;
+          while ((end = clean_msg.find('\n', start)) != std::string::npos) {
+              lines.push_back(clean_msg.substr(start, end - start));
+              start = end + 1;
+          }
+          lines.push_back(clean_msg.substr(start));
+
+          int y = 45;
+          for (const auto& line : lines) {
+              if (line.empty()) { y += 12; continue; }
+              it.print(120, y, id(font_body), Color::WHITE, TextAlign::CENTER, line.c_str());
+              y += 22;
+          }
+          return;
+      }
+
+      // === RESPONSE MODE - Clean with coral accent ===
+      // Header bar with time and battery
+      it.filled_rectangle(0, 0, 240, 22, Color(20, 20, 30));
+      it.line(0, 22, 240, 22, CORAL);
+      it.strftime(8, 4, id(font_small), DIM, TextAlign::TOP_LEFT, "%H:%M", id(sntp_time).now());
+      it.print(120, 4, id(font_small), CORAL, TextAlign::TOP_CENTER, "CLAWDBOT");
+
+      if (id(battery_level).has_state()) {
+        it.printf(232, 4, id(font_small), DIM, TextAlign::TOP_RIGHT, "%.0f%%", id(battery_level).state);
+      }
+
+      // Sanitize and display message
+      std::string clean_msg = "";
+      for (char c : msg) {
+        if (c == '\n' || (c >= 32 && c <= 126)) clean_msg += c;
+      }
+
+      std::vector<std::string> lines;
+      size_t start = 0, end;
+      while ((end = clean_msg.find('\n', start)) != std::string::npos) {
+          lines.push_back(clean_msg.substr(start, end - start));
+          start = end + 1;
+      }
+      lines.push_back(clean_msg.substr(start));
+
+      // Center content vertically
+      int y = (lines.size() > 4) ? 28 : ((lines.size() > 2) ? 40 : 55);
+      for (const auto& line : lines) {
+          if (line.empty()) { y += 12; continue; }
+          it.print(120, y, id(font_body), Color::WHITE, TextAlign::CENTER, line.c_str());
+          y += 22;
+      }
 
 font:
+  - file: "gfonts://Roboto Mono"
+    id: font_large
+    size: 38
   - file: "gfonts://Roboto Mono"
     id: font_body
     size: 16
   - file: "gfonts://Roboto Mono"
     id: font_small
-    size: 12
+    size: 10

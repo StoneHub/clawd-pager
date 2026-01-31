@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clawd Pager Dev Dashboard</title>
+    <style>
+        :root {
+            --bg-dark: #0a0a0f;
+            --bg-panel: #14141f;
+            --bg-hover: #1a1a2e;
+            --accent: #e94560;
+            --accent-dim: #a83248;
+            --text: #eaeaea;
+            --text-dim: #888;
+            --border: #2a2a3e;
+            --success: #4ade80;
+            --warning: #fbbf24;
+            --error: #ef4444;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+            background: var(--bg-dark);
+            color: var(--text);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        header {
+            background: var(--bg-panel);
+            border-bottom: 1px solid var(--border);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        header h1 {
+            font-size: 1.25rem;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        header h1 span {
+            color: var(--accent);
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.875rem;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--error);
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.connected {
+            background: var(--success);
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: auto 1fr;
+            gap: 1rem;
+            padding: 1rem;
+            height: calc(100vh - 60px);
+        }
+
+        .panel {
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .panel-header {
+            background: var(--bg-hover);
+            padding: 0.75rem 1rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .panel-content {
+            padding: 1rem;
+        }
+
+        /* Device State Panel */
+        .state-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1rem;
+        }
+
+        .state-item {
+            background: var(--bg-dark);
+            border-radius: 6px;
+            padding: 1rem;
+        }
+
+        .state-label {
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+        }
+
+        .state-value {
+            font-size: 1.5rem;
+            color: var(--accent);
+            font-weight: 600;
+        }
+
+        .state-value.mode {
+            font-size: 1rem;
+            padding: 0.25rem 0.5rem;
+            background: var(--accent-dim);
+            border-radius: 4px;
+            display: inline-block;
+        }
+
+        .state-value.text {
+            font-size: 0.875rem;
+            color: var(--text);
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        /* Event Stream Panel */
+        .event-stream {
+            height: 100%;
+            min-height: 300px;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .event {
+            padding: 0.5rem 0.75rem;
+            border-left: 3px solid var(--border);
+            margin: 0.25rem 0;
+            font-size: 0.8rem;
+            display: flex;
+            gap: 0.75rem;
+            background: var(--bg-dark);
+            border-radius: 0 4px 4px 0;
+            transition: background 0.2s;
+        }
+
+        .event:hover {
+            background: var(--bg-hover);
+        }
+
+        .event.device { border-color: var(--accent); }
+        .event.bridge { border-color: #3b82f6; }
+        .event.user { border-color: var(--success); }
+        .event.error { border-color: var(--error); background: rgba(239, 68, 68, 0.1); }
+
+        .event-time {
+            color: var(--text-dim);
+            font-size: 0.7rem;
+            min-width: 70px;
+        }
+
+        .event-type {
+            font-weight: 500;
+            min-width: 120px;
+        }
+
+        .event-data {
+            color: var(--text-dim);
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* Session Controls */
+        .session-controls {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        button {
+            background: var(--bg-hover);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.875rem;
+            transition: all 0.2s;
+        }
+
+        button:hover {
+            background: var(--accent-dim);
+            border-color: var(--accent);
+        }
+
+        button.primary {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+
+        button.primary:hover {
+            background: var(--accent-dim);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .session-status {
+            font-size: 0.875rem;
+            color: var(--text-dim);
+            padding: 0.5rem;
+            background: var(--bg-dark);
+            border-radius: 4px;
+        }
+
+        .session-status.recording {
+            color: var(--error);
+            animation: pulse 1s infinite;
+        }
+
+        /* Quick Actions */
+        .actions-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.5rem;
+        }
+
+        /* Sessions List */
+        .sessions-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .session-item {
+            padding: 0.5rem;
+            background: var(--bg-dark);
+            border-radius: 4px;
+            margin-bottom: 0.5rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .session-item:hover {
+            background: var(--bg-hover);
+        }
+
+        .session-id {
+            font-weight: 500;
+        }
+
+        .session-meta {
+            font-size: 0.75rem;
+            color: var(--text-dim);
+        }
+
+        /* Responsive */
+        @media (max-width: 900px) {
+            .container {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>
+            <span>CLAWD</span> PAGER DEV DASHBOARD
+        </h1>
+        <div class="status-indicator">
+            <div id="statusDot" class="status-dot"></div>
+            <span id="statusText">Disconnected</span>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Device State -->
+        <div class="panel">
+            <div class="panel-header">Device State</div>
+            <div class="panel-content">
+                <div class="state-grid">
+                    <div class="state-item">
+                        <div class="state-label">Mode</div>
+                        <div id="displayMode" class="state-value mode">--</div>
+                    </div>
+                    <div class="state-item">
+                        <div class="state-label">Battery</div>
+                        <div id="batteryLevel" class="state-value">--%</div>
+                    </div>
+                    <div class="state-item" style="grid-column: span 2;">
+                        <div class="state-label">Display Text</div>
+                        <div id="displayText" class="state-value text">--</div>
+                    </div>
+                    <div class="state-item">
+                        <div class="state-label">Button A</div>
+                        <div id="buttonA" class="state-value">OFF</div>
+                    </div>
+                    <div class="state-item">
+                        <div class="state-label">Button B</div>
+                        <div id="buttonB" class="state-value">OFF</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Session & Actions -->
+        <div class="panel">
+            <div class="panel-header">Session & Actions</div>
+            <div class="panel-content">
+                <div class="session-controls">
+                    <button id="startSession" class="primary">Start Recording</button>
+                    <button id="endSession" disabled>End Recording</button>
+                </div>
+                <div id="sessionStatus" class="session-status">Not recording</div>
+
+                <div class="panel-header" style="margin: 1rem -1rem 0.5rem; padding: 0.5rem 1rem;">Build & Deploy</div>
+                <div class="actions-grid">
+                    <button id="btnCompile" onclick="runCompile()" style="background: #3b82f6;">Compile</button>
+                    <button id="btnUpload" onclick="runUpload()" style="background: #22c55e;">Upload OTA</button>
+                </div>
+                <div id="buildStatus" class="session-status" style="margin-top: 0.5rem;">Ready</div>
+
+                <div class="panel-header" style="margin: 1rem -1rem 0.5rem; padding: 0.5rem 1rem;">Quick Actions</div>
+                <div class="actions-grid">
+                    <button onclick="sendTestAlert()">Send Test Alert</button>
+                    <button onclick="sendIdleMode()">Set IDLE</button>
+                    <button onclick="clearEvents()">Clear Events</button>
+                    <button onclick="exportSession()">Export Session</button>
+                </div>
+
+                <div class="panel-header" style="margin: 1rem -1rem 0.5rem; padding: 0.5rem 1rem;">Recent Sessions</div>
+                <div id="sessionsList" class="sessions-list">
+                    <div class="session-item">Loading...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Event Stream -->
+        <div class="panel" style="grid-column: span 2;">
+            <div class="panel-header">
+                Event Stream
+                <span id="eventCount" style="float: right; color: var(--text-dim);">0 events</span>
+            </div>
+            <div class="panel-content">
+                <div id="eventStream" class="event-stream"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const WS_URL = `ws://${window.location.hostname}:${window.location.port}/ws`;
+        let ws = null;
+        let reconnectTimer = null;
+        let eventCount = 0;
+        let isRecording = false;
+
+        // DOM Elements
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const eventStream = document.getElementById('eventStream');
+        const eventCountEl = document.getElementById('eventCount');
+        const displayMode = document.getElementById('displayMode');
+        const batteryLevel = document.getElementById('batteryLevel');
+        const displayText = document.getElementById('displayText');
+        const buttonA = document.getElementById('buttonA');
+        const buttonB = document.getElementById('buttonB');
+        const sessionStatus = document.getElementById('sessionStatus');
+        const startSessionBtn = document.getElementById('startSession');
+        const endSessionBtn = document.getElementById('endSession');
+        const sessionsList = document.getElementById('sessionsList');
+
+        // Connect to WebSocket
+        function connect() {
+            ws = new WebSocket(WS_URL);
+
+            ws.onopen = () => {
+                statusDot.classList.add('connected');
+                statusText.textContent = 'Connected';
+                console.log('Dashboard connected');
+            };
+
+            ws.onclose = () => {
+                statusDot.classList.remove('connected');
+                statusText.textContent = 'Disconnected';
+                console.log('Dashboard disconnected');
+
+                // Reconnect after 3 seconds
+                reconnectTimer = setTimeout(connect, 3000);
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    handleMessage(msg);
+                } catch (e) {
+                    console.error('Failed to parse message:', e);
+                }
+            };
+        }
+
+        function handleMessage(msg) {
+            switch (msg.type) {
+                case 'event':
+                    addEvent(msg.data);
+                    break;
+                case 'state':
+                    updateState(msg.data);
+                    break;
+                case 'session_started':
+                    setRecording(true, msg.session_id);
+                    break;
+                case 'session_ended':
+                    setRecording(false);
+                    loadSessions();
+                    break;
+                case 'pong':
+                    // Heartbeat response
+                    break;
+            }
+        }
+
+        function addEvent(event) {
+            eventCount++;
+            eventCountEl.textContent = `${eventCount} events`;
+
+            const div = document.createElement('div');
+            div.className = `event ${event.source}`;
+            if (event.event_type === 'ERROR') {
+                div.classList.add('error');
+            }
+
+            // Format timestamp
+            let time = '--:--:--';
+            if (event.timestamp) {
+                const ts = event.timestamp.split('T')[1] || event.timestamp;
+                time = ts.substring(0, 12);
+            }
+
+            // Format data
+            let dataStr = '';
+            if (event.data) {
+                dataStr = Object.entries(event.data)
+                    .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
+                    .join(' ');
+            }
+
+            div.innerHTML = `
+                <span class="event-time">${time}</span>
+                <span class="event-type">${event.event_type}</span>
+                <span class="event-data">${dataStr}</span>
+            `;
+
+            eventStream.insertBefore(div, eventStream.firstChild);
+
+            // Limit to 200 events
+            while (eventStream.children.length > 200) {
+                eventStream.removeChild(eventStream.lastChild);
+            }
+
+            // Update state based on event
+            if (event.event_type === 'DISPLAY_UPDATE' && event.data) {
+                if (event.data.mode) displayMode.textContent = event.data.mode;
+                if (event.data.text) displayText.textContent = event.data.text;
+            }
+            if (event.event_type === 'BUTTON_PRESS' && event.data) {
+                if (event.data.button === 'A') buttonA.textContent = 'ON';
+                if (event.data.button === 'B') buttonB.textContent = 'ON';
+            }
+            if (event.event_type === 'BUTTON_RELEASE' && event.data) {
+                if (event.data.button === 'A') buttonA.textContent = 'OFF';
+                if (event.data.button === 'B') buttonB.textContent = 'OFF';
+            }
+        }
+
+        function updateState(state) {
+            if (state.display_mode) displayMode.textContent = state.display_mode;
+            if (state.battery_level !== undefined) batteryLevel.textContent = `${state.battery_level}%`;
+            if (state.display_text) displayText.textContent = state.display_text;
+            buttonA.textContent = state.button_a ? 'ON' : 'OFF';
+            buttonB.textContent = state.button_b ? 'ON' : 'OFF';
+        }
+
+        function setRecording(recording, sessionId = null) {
+            isRecording = recording;
+            startSessionBtn.disabled = recording;
+            endSessionBtn.disabled = !recording;
+
+            if (recording) {
+                sessionStatus.textContent = `Recording: ${sessionId}`;
+                sessionStatus.classList.add('recording');
+            } else {
+                sessionStatus.textContent = 'Not recording';
+                sessionStatus.classList.remove('recording');
+            }
+        }
+
+        // Session controls
+        startSessionBtn.addEventListener('click', async () => {
+            const notes = prompt('Session notes (optional):') || '';
+            try {
+                const resp = await fetch('/api/session/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ notes })
+                });
+                const data = await resp.json();
+                setRecording(true, data.session_id);
+            } catch (e) {
+                console.error('Failed to start session:', e);
+            }
+        });
+
+        endSessionBtn.addEventListener('click', async () => {
+            try {
+                await fetch('/api/session/end', { method: 'POST' });
+                setRecording(false);
+                loadSessions();
+            } catch (e) {
+                console.error('Failed to end session:', e);
+            }
+        });
+
+        // Quick actions
+        async function sendTestAlert() {
+            await fetch('/api/log', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    source: 'dashboard',
+                    event_type: 'TEST_ALERT',
+                    data: { message: 'Test alert from dashboard' }
+                })
+            });
+        }
+
+        async function sendIdleMode() {
+            await fetch('/api/log', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    source: 'dashboard',
+                    event_type: 'SET_MODE',
+                    data: { mode: 'IDLE' }
+                })
+            });
+        }
+
+        function clearEvents() {
+            eventStream.innerHTML = '';
+            eventCount = 0;
+            eventCountEl.textContent = '0 events';
+        }
+
+        async function exportSession() {
+            const sessions = await fetch('/api/sessions').then(r => r.json());
+            if (sessions.length === 0) {
+                alert('No sessions to export');
+                return;
+            }
+            const latest = sessions[0].session_id;
+            const session = await fetch(`/api/session/${latest}`).then(r => r.json());
+            const blob = new Blob([JSON.stringify(session, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${latest}.json`;
+            a.click();
+        }
+
+        // Load sessions list
+        async function loadSessions() {
+            try {
+                const sessions = await fetch('/api/sessions').then(r => r.json());
+                if (sessions.length === 0) {
+                    sessionsList.innerHTML = '<div class="session-item">No sessions</div>';
+                    return;
+                }
+                sessionsList.innerHTML = sessions.slice(0, 5).map(s => `
+                    <div class="session-item" onclick="viewSession('${s.session_id}')">
+                        <div class="session-id">${s.session_id}</div>
+                        <div class="session-meta">
+                            ${s.event_count} events | ${s.error_count} errors
+                            ${s.notes ? ' | ' + s.notes.substring(0, 30) : ''}
+                        </div>
+                    </div>
+                `).join('');
+            } catch (e) {
+                sessionsList.innerHTML = '<div class="session-item">Failed to load</div>';
+            }
+        }
+
+        function viewSession(sessionId) {
+            window.open(`/api/session/${sessionId}`, '_blank');
+        }
+
+        // Build & Deploy
+        const buildStatus = document.getElementById('buildStatus');
+        const btnCompile = document.getElementById('btnCompile');
+        const btnUpload = document.getElementById('btnUpload');
+
+        async function runCompile() {
+            btnCompile.disabled = true;
+            buildStatus.textContent = 'Compiling...';
+            buildStatus.classList.add('recording');
+
+            try {
+                const resp = await fetch('/api/build/compile', { method: 'POST' });
+                const data = await resp.json();
+                if (data.success) {
+                    buildStatus.textContent = `Compiled in ${data.duration_s}s`;
+                    buildStatus.classList.remove('recording');
+                } else {
+                    buildStatus.textContent = 'Compile FAILED';
+                }
+            } catch (e) {
+                buildStatus.textContent = 'Build endpoint not available';
+            }
+            btnCompile.disabled = false;
+        }
+
+        async function runUpload() {
+            btnUpload.disabled = true;
+            buildStatus.textContent = 'Uploading to 192.168.50.85...';
+            buildStatus.classList.add('recording');
+
+            try {
+                const resp = await fetch('/api/build/upload', { method: 'POST' });
+                const data = await resp.json();
+                if (data.success) {
+                    buildStatus.textContent = `Uploaded in ${data.duration_s}s`;
+                    buildStatus.classList.remove('recording');
+                } else {
+                    buildStatus.textContent = 'Upload FAILED';
+                }
+            } catch (e) {
+                buildStatus.textContent = 'Upload endpoint not available';
+            }
+            btnUpload.disabled = false;
+        }
+
+        // Heartbeat
+        setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'ping' }));
+            }
+        }, 30000);
+
+        // Initialize
+        connect();
+        loadSessions();
+    </script>
+</body>
+</html>
