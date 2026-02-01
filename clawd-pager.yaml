@@ -412,19 +412,8 @@ binary_sensor:
                   id: pager_display
                   state: "CLAWDBOT READY"
 
-  # Power Button - Toggle brightness
-  - platform: gpio
-    pin:
-      number: GPIO35
-      inverted: true
-    name: "Power Button"
-    on_click:
-      min_length: 50ms
-      max_length: 500ms
-      then:
-        - lambda: |-
-            id(screen_bright) = !id(screen_bright);
-            id(my_axp).set_brightness(id(screen_bright) ? 1.0 : 0.2);
+  # Power Button (GPIO35) - Handled by AXP192 hardware, not addressable via GPIO
+  # Physical button: short press = wake, long press (6s) = power off
 
 # Text sensors - exposed to bridge
 text_sensor:
@@ -448,9 +437,6 @@ globals:
   - id: btn_b_pressed
     type: bool
     initial_value: 'false'
-  - id: screen_bright
-    type: bool
-    initial_value: 'true'
   # Development mode - enables verbose event logging
   - id: dev_mode
     type: bool
@@ -472,15 +458,34 @@ script:
           id(my_axp).set_brightness(1.0);
       - delay: 30s
       - lambda: |-
-          // Don't dim if charging/docked - we have power!
-          if (id(display_mode).state != "DOCKED") {
+          // Don't dim if docked OR battery nearly full (plugged in and charged)
+          bool has_power = (id(display_mode).state == "DOCKED") ||
+                           (id(battery_level).has_state() && id(battery_level).state >= 95.0);
+          if (!has_power) {
             id(my_axp).set_brightness(0.4);
           }
       - delay: 30s
       - lambda: |-
-          // Don't dim if charging/docked
-          if (id(display_mode).state != "DOCKED") {
+          // Don't dim if docked OR battery nearly full
+          bool has_power = (id(display_mode).state == "DOCKED") ||
+                           (id(battery_level).has_state() && id(battery_level).state >= 95.0);
+          if (!has_power) {
             id(my_axp).set_brightness(0.1);
+          }
+      - delay: 120s
+      - lambda: |-
+          // Auto power off after 3 minutes total inactivity
+          // Skip if charging/docked
+          bool has_power = (id(display_mode).state == "DOCKED") ||
+                           (id(battery_level).has_state() && id(battery_level).state >= 95.0);
+          if (!has_power) {
+            ESP_LOGI("POWER", "Auto power off after 3 min inactivity");
+            // Power off via AXP192 register 0x32, bit 7
+            // Write to I2C address 0x34, register 0x32, value 0x80
+            Wire.beginTransmission(0x34);
+            Wire.write(0x32);
+            Wire.write(0x80);  // Bit 7 = power off
+            Wire.endTransmission();
           }
 
 spi:
@@ -1328,62 +1333,122 @@ display:
           return;
       }
 
-      // === IDLE / HOME SCREEN - Polished watch-style display ===
+      // === LOADING MODE - Clean minimal loading indicator ===
+      if (mode == "LOADING") {
+          int load_frame = (millis() / 80) % 40;
+
+          // Simple message at top
+          it.print(120, 30, id(font_body), Color(150, 150, 160), TextAlign::CENTER, msg.c_str());
+
+          // Minimal animated dots - just 3 cycling dots
+          for (int i = 0; i < 3; i++) {
+              int alpha = 60;
+              // One dot is bright at a time, cycles through
+              if (i == (load_frame / 13) % 3) {
+                  alpha = 255;
+              }
+              Color dot_c = Color(alpha, alpha, alpha + 20);
+              it.filled_circle(100 + i * 20, 70, 4, dot_c);
+          }
+
+          return;
+      }
+
+      // === BRIEFING MODE - Colorful status update display ===
+      if (mode == "BRIEFING") {
+          int brief_frame = (millis() / 150) % 20;
+
+          // Gradient header bar - teal to cyan
+          for (int i = 0; i < 24; i++) {
+              int r = 0;
+              int g = 180 + (i * 3);
+              int b = 200 + (i * 2);
+              if (g > 255) g = 255;
+              if (b > 255) b = 255;
+              it.line(0, i, 240, i, Color(r, g, b));
+          }
+          it.print(120, 5, id(font_body), Color::BLACK, TextAlign::TOP_CENTER, "STATUS UPDATE");
+
+          // Parse message into lines
+          std::vector<std::string> lines;
+          std::string current = "";
+          for (char c : msg) {
+              if (c == '\n') {
+                  if (!current.empty()) lines.push_back(current);
+                  current = "";
+              } else if (c >= 32 && c <= 126) {
+                  current += c;
+              }
+          }
+          if (!current.empty()) lines.push_back(current);
+
+          // Content box with subtle border
+          it.filled_rectangle(8, 28, 224, 70, Color(15, 25, 30));
+          it.rectangle(8, 28, 224, 70, TEAL);
+
+          // Content lines with word wrap
+          int y = 34;
+          for (size_t i = 0; i < lines.size() && i < 3; i++) {
+              std::string line = lines[i];
+              if (line.length() > 28) line = line.substr(0, 28);
+              it.print(120, y, id(font_body), Color::WHITE, TextAlign::CENTER, line.c_str());
+              y += 20;
+          }
+
+          // Action buttons - colorful and clear
+          // A = More (cyan, left)
+          it.filled_rectangle(15, 105, 100, 25, CYAN);
+          it.print(65, 110, id(font_body), Color::BLACK, TextAlign::CENTER, "A = MORE");
+
+          // B = Done (coral, right)
+          it.filled_rectangle(125, 105, 100, 25, CORAL);
+          it.print(175, 110, id(font_body), Color::BLACK, TextAlign::CENTER, "B = DONE");
+
+          return;
+      }
+
+      // === IDLE / HOME SCREEN - Static, clean display ===
       if (mode == "IDLE" || msg == "CLAWDBOT READY" || msg.empty()) {
-          int idle_frame = (millis() / 100) % 100;
+          // Solid dark background - no animation
+          it.fill(Color(10, 15, 25));
 
-          // Subtle animated gradient header
-          int gradient_shift = (idle_frame / 2) % 20;
-          for (int i = 0; i < 20; i++) {
-              int brightness = 20 + ((i + gradient_shift) % 20) * 2;
-              it.line(0, i, 240, i, Color(0, brightness, brightness));
-          }
+          // Top status bar
+          it.filled_rectangle(0, 0, 240, 18, Color(0, 30, 40));
 
-          // "CLAWD" branding - centered, prominent
-          it.print(120, 5, id(font_body), CYAN, TextAlign::TOP_CENTER, "CLAWD");
-
-          // Large clock - crisp white, centered
-          it.strftime(120, 38, id(font_large), Color::WHITE, TextAlign::CENTER, "%H:%M", id(sntp_time).now());
-
-          // Seconds indicator - small dots that fill up
-          int seconds = id(sntp_time).now().second;
-          int filled_dots = seconds / 10;  // 6 dots, one per 10 seconds
-          for (int i = 0; i < 6; i++) {
-              int x = 75 + i * 18;
-              Color dot_c = (i < filled_dots) ? CYAN : Color(40, 40, 50);
-              it.filled_circle(x, 75, 3, dot_c);
-          }
-
-          // Date below clock
-          it.strftime(120, 85, id(font_body), Color(120, 120, 140), TextAlign::CENTER, "%a %b %d", id(sntp_time).now());
-
-          // Weather (if available) - with icon placeholder
-          std::string weather = id(weather_display).state;
-          if (!weather.empty()) {
-              if (weather.length() > 20) weather = weather.substr(0, 20);
-              it.print(120, 105, id(font_body), TEAL, TextAlign::CENTER, weather.c_str());
-          }
-
-          // Bottom status bar with battery
+          // Battery icon (always visible, left side)
           if (id(battery_level).has_state()) {
               float batt = id(battery_level).state;
               Color batt_color = (batt > 50) ? LIME : ((batt > 20) ? AMBER : RED);
 
-              // Battery icon outline
-              it.rectangle(95, 122, 40, 12, batt_color);
-              it.filled_rectangle(135, 125, 3, 6, batt_color);  // Nub
+              // Battery outline
+              it.rectangle(8, 4, 28, 10, batt_color);
+              it.filled_rectangle(36, 6, 2, 6, batt_color);  // Nub
 
               // Battery fill
-              int fill_width = (int)(batt / 100.0 * 36);
-              it.filled_rectangle(97, 124, fill_width, 8, batt_color);
+              int fill = (int)(batt / 100.0 * 24);
+              it.filled_rectangle(10, 6, fill, 6, batt_color);
 
-              // Percentage next to battery
-              it.printf(145, 122, id(font_body), batt_color, TextAlign::TOP_LEFT, "%.0f%%", batt);
+              // Percentage
+              it.printf(42, 4, id(font_small), batt_color, "%.0f%%", batt);
           }
 
-          // Connection status indicator (top right)
-          Color conn_color = id(pulse_state) ? LIME : Color(30, 80, 30);
-          it.filled_circle(225, 10, 4, conn_color);
+          // Connection indicator (right side) - solid green, no pulse
+          it.filled_circle(225, 9, 4, LIME);
+
+          // Large clock - CYAN colored for visibility
+          it.strftime(120, 45, id(font_large), CYAN, TextAlign::CENTER, "%H:%M", id(sntp_time).now());
+
+          // Date - coral accent
+          it.strftime(120, 88, id(font_body), CORAL, TextAlign::CENTER, "%a %b %d", id(sntp_time).now());
+
+          // Weather (if available) or hint
+          std::string weather = id(weather_display).state;
+          if (!weather.empty()) {
+              if (weather.length() > 26) weather = weather.substr(0, 26);
+              it.print(120, 112, id(font_body), TEAL, TextAlign::CENTER, weather.c_str());
+          } else {
+              it.print(120, 112, id(font_small), Color(60, 80, 100), TextAlign::CENTER, "Tap A for status");
+          }
 
           return;
       }
