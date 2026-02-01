@@ -1,7 +1,7 @@
 # Clawd Pager - Project State
 
-**Last Updated**: 2026-01-31 21:30 EST
-**Status**: READY TO TEST - Firmware needs compile/upload
+**Last Updated**: 2026-01-31 (late evening)
+**Status**: ✅ ANIMATIONS DEPLOYED - C++ Refactoring In Progress
 
 ---
 
@@ -11,19 +11,20 @@
 
 ---
 
-## Current State: Uncommitted Changes Ready
+## Current State: Animations Live + Refactoring Started
 
-### What's Changed (Not Yet Deployed)
+### ✅ What's Deployed (On Device Now)
 
-**Firmware (clawd-pager.yaml)**:
-- Button A = Yes/Status (short), Voice (hold 400ms+)
-- Button B = No/Back/Cancel
-- CONFIRM mode display (shows transcription before sending)
-- Rainbow waveform LISTENING animation
-- Bouncy dots PROCESSING animation
-- Fun sounds: Mario startup, Zelda "item get" for YES, sad trombone for NO
+**Firmware (clawd-pager.yaml)** - Compiled and uploaded 2026-01-31:
+- ✅ Button A = Yes/Status (short), Voice (hold 400ms+)
+- ✅ Button B = No/Back/Cancel
+- ✅ CONFIRM mode display (shows transcription before sending)
+- ✅ Rainbow waveform LISTENING animation 🌈
+- ✅ Bouncy dots PROCESSING animation ⚽
+- ✅ Matrix code rain AGENT animation 💚
+- ✅ Fun sounds: Mario startup, Zelda "item get" for YES, sad trombone for NO
 
-**Bridge (bridge.py)**:
+**Bridge (bridge.py)** - Running on Pi:
 - Connection stability: 5-second checks, ping keepalive, 3-strike disconnect rule
 - Request queue with source tracking (Claude Code vs Clawdbot)
 - Response routing to `~/.clawd/pager_response.json`
@@ -35,19 +36,53 @@
 - New `ask` command: `claude_hook.py ask "Question?" --timeout 30`
 - Polls bridge for user response, returns "yes" or "no" to stdout
 
+### 🚧 In Progress: C++ Display Mode Refactoring
+
+**Created** (in `display_modes/`):
+- ✅ `display_mode_base.h` - Abstract base class, utilities, color palette
+- ✅ `listening_mode.h` - Rainbow waveform (extracted from YAML)
+- ✅ `processing_mode.h` - Bouncing balls with shadows
+- ✅ `agent_mode.h` - Matrix code rain + bouncing ball
+- ✅ `display_mode_manager.h` - Routing dispatcher (needs implementation)
+- ✅ `README.md` - Architecture guide and decisions
+
+**TODO - Monroe's Task**:
+- ⏳ Implement routing logic in `display_mode_manager.h:30`
+  - Route LISTENING, PROCESSING, AGENT to C++ renderers
+  - ~10-15 lines of code
+  - See README.md for guidance
+
+**After Routing Complete**:
+- Update YAML to call DisplayModeManager for those 3 modes
+- Compile and test refactored firmware
+- Compare performance/maintainability
+
 ---
 
-## Immediate Next Steps
+## Immediate Next Steps (When You Wake Up)
 
-### Step 1: Compile Firmware
+### Step 1: Implement Display Routing
+Open `display_modes/display_mode_manager.h` and implement the `render()` method:
+```cpp
+if (mode == "LISTENING") {
+    listening_mode.render(it, millis, message);
+} else if (mode == "PROCESSING") {
+    processing_mode.render(it, millis, message);
+} else if (mode == "AGENT") {
+    agent_mode.render(it, millis, message);
+} else {
+    it.fill(esphome::Color::BLACK);
+}
+```
+
+### Step 2: Let Claude Update YAML
+Tell Claude "done with routing" and it will integrate DisplayModeManager into clawd-pager.yaml
+
+### Step 3: Test
 ```bash
 cd /home/monroe/clawd/work/clawd-pager
 source /home/monroe/clawd/esphome-env/bin/activate
 ESPHOME_COMPILE_PROCESSES=1 esphome compile clawd-pager.yaml
-```
-
-### Step 2: Upload to Device
-```bash
 esphome upload clawd-pager.yaml --device 192.168.50.85
 ```
 

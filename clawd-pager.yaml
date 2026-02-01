@@ -755,6 +755,252 @@ display:
           return;
       }
 
+      // === AGENT_EDIT MODE - File editing with diff stats ===
+      if (mode == "AGENT_EDIT") {
+          int edit_frame = (millis() / 100) % 20;
+
+          // Green accent for additions, parse message for +/- info
+          Color accent = LIME;
+          if (msg.find("-") != std::string::npos && msg.find("+") == std::string::npos) {
+              accent = RED;  // Deletions
+          } else if (msg.find("~") != std::string::npos) {
+              accent = AMBER;  // Modifications
+          }
+
+          // Animated code brackets
+          int bracket_bounce = abs(edit_frame - 10);
+          it.print(20 + bracket_bounce, 30, id(font_large), accent, TextAlign::CENTER, "{");
+          it.print(220 - bracket_bounce, 30, id(font_large), accent, TextAlign::CENTER, "}");
+
+          // File info centered
+          std::string line1 = msg.substr(0, msg.find('\n'));
+          std::string line2 = "";
+          if (msg.find('\n') != std::string::npos) {
+              line2 = msg.substr(msg.find('\n') + 1);
+          }
+
+          it.print(120, 50, id(font_body), Color::WHITE, TextAlign::CENTER, line1.c_str());
+          it.print(120, 75, id(font_body), accent, TextAlign::CENTER, line2.c_str());
+
+          // Animated progress bar
+          int bar_width = (edit_frame * 12) % 200;
+          it.filled_rectangle(20, 105, bar_width, 8, accent);
+          it.rectangle(20, 105, 200, 8, DIM);
+
+          return;
+      }
+
+      // === AGENT_NEW MODE - Creating new file ===
+      if (mode == "AGENT_NEW") {
+          int new_frame = (millis() / 150) % 20;
+
+          // Sparkle effect for new file
+          Color sparkles[] = {CYAN, Color::WHITE, PINK, CYAN};
+          for (int i = 0; i < 8; i++) {
+              int x = 30 + ((i * 47 + new_frame * 13) % 180);
+              int y = 10 + ((i * 23 + new_frame * 7) % 25);
+              int size = 1 + (new_frame + i) % 3;
+              it.filled_circle(x, y, size, sparkles[i % 4]);
+          }
+
+          // File icon (simple doc shape)
+          it.filled_rectangle(95, 45, 50, 60, Color(30, 30, 40));
+          it.filled_rectangle(95, 45, 50, 15, CYAN);
+          it.filled_rectangle(130, 45, 15, 15, Color(30, 30, 40));  // Folded corner
+
+          // Plus sign
+          it.filled_rectangle(115, 70, 20, 4, LIME);
+          it.filled_rectangle(123, 62, 4, 20, LIME);
+
+          // File name below
+          std::string line1 = msg.substr(0, msg.find('\n'));
+          it.print(120, 115, id(font_body), CYAN, TextAlign::CENTER, line1.c_str());
+
+          return;
+      }
+
+      // === AGENT_BASH MODE - Terminal command ===
+      if (mode == "AGENT_BASH") {
+          int bash_frame = (millis() / 100) % 30;
+
+          // Terminal background
+          it.filled_rectangle(10, 10, 220, 115, Color(10, 10, 15));
+          it.rectangle(10, 10, 220, 115, ORANGE);
+
+          // Terminal title bar
+          it.filled_rectangle(10, 10, 220, 18, Color(40, 30, 20));
+          it.print(120, 12, id(font_small), ORANGE, TextAlign::TOP_CENTER, "TERMINAL");
+
+          // Prompt with blinking cursor
+          it.print(20, 35, id(font_body), LIME, TextAlign::TOP_LEFT, "$");
+
+          // Command text (from msg)
+          std::string cmd = msg;
+          if (cmd.length() > 28) cmd = cmd.substr(0, 28) + "...";
+          it.print(35, 35, id(font_body), Color::WHITE, TextAlign::TOP_LEFT, cmd.c_str());
+
+          // Blinking cursor
+          if (bash_frame < 15) {
+              int cursor_x = 35 + cmd.length() * 8;
+              if (cursor_x > 200) cursor_x = 200;
+              it.filled_rectangle(cursor_x, 35, 8, 16, ORANGE);
+          }
+
+          // Running indicator
+          std::string dots = "";
+          for (int i = 0; i < (bash_frame / 5) % 4; i++) dots += ".";
+          it.print(20, 65, id(font_small), DIM, TextAlign::TOP_LEFT, ("Running" + dots).c_str());
+
+          return;
+      }
+
+      // === AGENT_SEARCH MODE - Grep/Glob search ===
+      if (mode == "AGENT_SEARCH") {
+          int search_frame = (millis() / 80) % 40;
+
+          // Scanning lines animation
+          for (int i = 0; i < 10; i++) {
+              int y = ((i * 13 + search_frame * 4) % 135);
+              int alpha = 255 - abs(67 - y) * 3;
+              if (alpha < 30) alpha = 30;
+              Color line_color = Color(147 * alpha / 255, 112 * alpha / 255, 219 * alpha / 255);
+              it.line(20, y, 220, y, line_color);
+          }
+
+          // Magnifying glass icon
+          int glass_bounce = abs((search_frame % 20) - 10) / 3;
+          it.circle(50, 55 + glass_bounce, 15, PURPLE);
+          it.circle(50, 55 + glass_bounce, 14, PURPLE);
+          it.line(60, 65 + glass_bounce, 75, 80 + glass_bounce, PURPLE);
+          it.line(61, 66 + glass_bounce, 76, 81 + glass_bounce, PURPLE);
+
+          // Search text
+          std::string line1 = msg.substr(0, msg.find('\n'));
+          if (line1.length() > 20) line1 = line1.substr(0, 20) + "...";
+          it.print(140, 50, id(font_body), PURPLE, TextAlign::CENTER, line1.c_str());
+
+          std::string line2 = "";
+          if (msg.find('\n') != std::string::npos) {
+              line2 = msg.substr(msg.find('\n') + 1);
+          }
+          it.print(140, 75, id(font_small), DIM, TextAlign::CENTER, line2.c_str());
+
+          return;
+      }
+
+      // === AGENT_WEB MODE - Web fetch/search ===
+      if (mode == "AGENT_WEB") {
+          int web_frame = (millis() / 60) % 60;
+
+          // Globe animation (spinning dots)
+          for (int i = 0; i < 12; i++) {
+              float angle = (i * 30 + web_frame * 6) * 3.14159 / 180;
+              int x = 50 + cos(angle) * 25;
+              int y = 55 + sin(angle) * 15;
+              Color dot_color = (i % 2 == 0) ? CYAN : TEAL;
+              it.filled_circle(x, y, 3, dot_color);
+          }
+          it.circle(50, 55, 25, CYAN);
+          it.line(25, 55, 75, 55, TEAL);
+          it.line(50, 30, 50, 80, TEAL);
+
+          // URL/query text
+          std::string line1 = msg.substr(0, msg.find('\n'));
+          it.print(150, 45, id(font_body), CYAN, TextAlign::CENTER, line1.c_str());
+
+          std::string line2 = "";
+          if (msg.find('\n') != std::string::npos) {
+              line2 = msg.substr(msg.find('\n') + 1);
+              if (line2.length() > 20) line2 = line2.substr(0, 20) + "...";
+          }
+          it.print(150, 70, id(font_small), DIM, TextAlign::CENTER, line2.c_str());
+
+          // Loading bar
+          int bar_pos = (web_frame * 4) % 200;
+          it.filled_rectangle(20 + bar_pos, 105, 30, 6, CYAN);
+
+          return;
+      }
+
+      // === AGENT_SUB MODE - Sub-agent working ===
+      if (mode == "AGENT_SUB") {
+          int sub_frame = (millis() / 100) % 30;
+
+          // Multiple bouncing agents (dots)
+          Color agent_colors[] = {PINK, PURPLE, CYAN, LIME};
+          for (int i = 0; i < 4; i++) {
+              int bounce = abs(((sub_frame + i * 7) % 20) - 10);
+              int x = 40 + i * 50;
+              it.filled_circle(x, 50 + bounce, 8, agent_colors[i]);
+              it.filled_circle(x - 2, 48 + bounce, 2, Color::WHITE);  // Highlight
+          }
+
+          // Agent type text
+          std::string line1 = msg.substr(0, msg.find('\n'));
+          it.print(120, 80, id(font_body), PINK, TextAlign::CENTER, line1.c_str());
+
+          std::string line2 = "";
+          if (msg.find('\n') != std::string::npos) {
+              line2 = msg.substr(msg.find('\n') + 1);
+          }
+          it.print(120, 100, id(font_small), DIM, TextAlign::CENTER, line2.c_str());
+
+          return;
+      }
+
+      // === AGENT_PLAN MODE - Planning/todos ===
+      if (mode == "AGENT_PLAN") {
+          int plan_frame = (millis() / 200) % 10;
+
+          // Checklist animation
+          it.filled_rectangle(30, 20, 180, 100, Color(20, 20, 15));
+          it.rectangle(30, 20, 180, 100, AMBER);
+
+          // Checkboxes appearing
+          int visible_boxes = (plan_frame % 4) + 1;
+          for (int i = 0; i < visible_boxes && i < 4; i++) {
+              int y = 30 + i * 22;
+              it.rectangle(45, y, 14, 14, AMBER);
+              if (i < visible_boxes - 1) {
+                  // Checked
+                  it.line(48, y + 7, 52, y + 11, LIME);
+                  it.line(52, y + 11, 58, y + 3, LIME);
+              }
+              // Line placeholder
+              int line_w = 80 + (i * 20) % 40;
+              it.filled_rectangle(70, y + 4, line_w, 6, Color(60, 60, 50));
+          }
+
+          // Planning text
+          it.print(120, 125, id(font_small), AMBER, TextAlign::CENTER, msg.c_str());
+
+          return;
+      }
+
+      // === AGENT_READ MODE - Reading file ===
+      if (mode == "AGENT_READ") {
+          int read_frame = (millis() / 50) % 40;
+
+          // Page turning effect - simulated text lines scrolling
+          for (int i = 0; i < 8; i++) {
+              int y = 25 + i * 12;
+              int offset = (read_frame + i * 3) % 20;
+              int width = 140 + (offset * 3) - (i * 5);
+              if (width > 180) width = 180;
+              if (width < 60) width = 60;
+              int alpha = 200 - i * 20;
+              Color line_color = Color(50 * alpha / 255, 100 * alpha / 255, 200 * alpha / 255);
+              it.filled_rectangle(30, y, width, 6, line_color);
+          }
+
+          // File name
+          std::string filename = msg;
+          if (filename.length() > 25) filename = "..." + filename.substr(filename.length() - 22);
+          it.print(120, 115, id(font_body), Color(100, 150, 255), TextAlign::CENTER, filename.c_str());
+
+          return;
+      }
+
       // === AGENT MODE - Claude Code is working ===
       if (mode == "AGENT") {
           int code_frame = (millis() / 80) % 40;  // Fast animation
