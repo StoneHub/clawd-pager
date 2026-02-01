@@ -65,6 +65,7 @@ logger:
 api:
   services:
     # Main display update service - called by bridge
+    # Modes starting with "SILENT_" skip the beep but show correct display
     - service: set_display
       variables:
         my_text: string
@@ -73,12 +74,21 @@ api:
         - text_sensor.template.publish:
             id: pager_display
             state: !lambda "return my_text;"
-        - text_sensor.template.publish:
-            id: display_mode
-            state: !lambda "return my_mode;"
+        - lambda: |-
+            // Handle SILENT_ prefix: strip it and skip beep
+            std::string mode = my_mode;
+            bool silent = false;
+            if (mode.substr(0, 7) == "SILENT_") {
+                mode = mode.substr(7);  // Strip "SILENT_" prefix
+                silent = true;
+            }
+            id(display_mode).publish_state(mode);
         - if:
             condition:
-              lambda: 'return my_mode != "SILENT";'
+              lambda: |-
+                std::string mode = my_mode;
+                // No beep if SILENT or SILENT_ prefixed
+                return mode != "SILENT" && mode.substr(0, 7) != "SILENT_";
             then:
               - rtttl.play: "Blip:d=32,o=6,b=150:c6"
         - script.execute: activity_watcher
@@ -838,33 +848,101 @@ display:
       if (mode == "AGENT_EDIT") {
           int edit_frame = (millis() / 100) % 20;
 
-          // Green accent for additions, parse message for +/- info
-          Color accent = LIME;
-          if (msg.find("-") != std::string::npos && msg.find("+") == std::string::npos) {
-              accent = RED;  // Deletions
-          } else if (msg.find("~") != std::string::npos) {
-              accent = AMBER;  // Modifications
+          // Parse message: line1=filename, line2=diff stats, line3=code preview
+          std::vector<std::string> lines;
+          std::string current = "";
+          for (char c : msg) {
+              if (c == '\n') {
+                  lines.push_back(current);
+                  current = "";
+              } else if (c >= 32 && c <= 126) {
+                  current += c;
+              }
+          }
+          if (!current.empty()) lines.push_back(current);
+
+          std::string filename = lines.size() > 0 ? lines[0] : "file";
+          std::string diff_stats = lines.size() > 1 ? lines[1] : "";
+          std::string code_preview = lines.size() > 2 ? lines[2] : "";
+
+          // Determine accent color from diff stats
+          Color accent = AMBER;  // Default: modification
+          bool has_add = diff_stats.find("+") != std::string::npos;
+          bool has_del = diff_stats.find("-") != std::string::npos;
+          if (has_add && !has_del) {
+              accent = LIME;  // Pure additions
+          } else if (has_del && !has_add) {
+              accent = RED;   // Pure deletions
+          } else if (has_add && has_del) {
+              // Mixed - check which is bigger
+              int add_count = 0, del_count = 0;
+              size_t plus_pos = diff_stats.find("+");
+              size_t minus_pos = diff_stats.find("-");
+              if (plus_pos != std::string::npos) {
+                  add_count = atoi(diff_stats.c_str() + plus_pos + 1);
+              }
+              if (minus_pos != std::string::npos) {
+                  del_count = atoi(diff_stats.c_str() + minus_pos + 1);
+              }
+              if (add_count > del_count) accent = LIME;
+              else if (del_count > add_count) accent = RED;
           }
 
-          // Animated code brackets
-          int bracket_bounce = abs(edit_frame - 10);
-          it.print(20 + bracket_bounce, 30, id(font_large), accent, TextAlign::CENTER, "{");
-          it.print(220 - bracket_bounce, 30, id(font_large), accent, TextAlign::CENTER, "}");
+          // Header bar with accent color
+          it.filled_rectangle(0, 0, 240, 22, accent);
+          it.print(120, 4, id(font_body), Color::BLACK, TextAlign::TOP_CENTER, "EDITING");
 
-          // File info centered
-          std::string line1 = msg.substr(0, msg.find('\n'));
-          std::string line2 = "";
-          if (msg.find('\n') != std::string::npos) {
-              line2 = msg.substr(msg.find('\n') + 1);
+          // Filename - large and prominent
+          if (filename.length() > 22) filename = filename.substr(0, 22);
+          it.print(120, 30, id(font_body), Color::WHITE, TextAlign::CENTER, filename.c_str());
+
+          // Diff stats - show +X and -Y separately with colors
+          if (!diff_stats.empty()) {
+              // Parse and display add/remove separately
+              int y_stats = 52;
+              size_t plus_pos = diff_stats.find("+");
+              size_t minus_pos = diff_stats.find("-");
+
+              if (plus_pos != std::string::npos && minus_pos != std::string::npos) {
+                  // Show both: green +X  red -Y
+                  std::string add_part = "";
+                  std::string del_part = "";
+                  // Extract numbers
+                  size_t i = plus_pos;
+                  while (i < diff_stats.length() && (diff_stats[i] == '+' || isdigit(diff_stats[i]))) {
+                      add_part += diff_stats[i++];
+                  }
+                  i = minus_pos;
+                  while (i < diff_stats.length() && (diff_stats[i] == '-' || isdigit(diff_stats[i]))) {
+                      del_part += diff_stats[i++];
+                  }
+                  it.print(90, y_stats, id(font_body), LIME, TextAlign::CENTER, add_part.c_str());
+                  it.print(150, y_stats, id(font_body), RED, TextAlign::CENTER, del_part.c_str());
+              } else {
+                  // Just show the stats in accent color
+                  it.print(120, y_stats, id(font_body), accent, TextAlign::CENTER, diff_stats.c_str());
+              }
           }
 
-          it.print(120, 50, id(font_body), Color::WHITE, TextAlign::CENTER, line1.c_str());
-          it.print(120, 75, id(font_body), accent, TextAlign::CENTER, line2.c_str());
+          // Code preview box (if small change)
+          if (!code_preview.empty()) {
+              // Dark code box
+              it.filled_rectangle(10, 72, 220, 28, Color(20, 20, 30));
+              it.rectangle(10, 72, 220, 28, Color(60, 60, 80));
 
-          // Animated progress bar
+              // Code text - monospace style
+              if (code_preview.length() > 28) {
+                  // Scroll long code
+                  int scroll = (edit_frame / 2) % (code_preview.length() - 26);
+                  code_preview = code_preview.substr(scroll, 28);
+              }
+              it.print(20, 78, id(font_body), Color(150, 200, 150), TextAlign::TOP_LEFT, code_preview.c_str());
+          }
+
+          // Animated progress bar at bottom
           int bar_width = (edit_frame * 12) % 200;
-          it.filled_rectangle(20, 105, bar_width, 8, accent);
-          it.rectangle(20, 105, 200, 8, DIM);
+          it.filled_rectangle(20, 108, bar_width, 6, accent);
+          it.rectangle(20, 108, 200, 6, Color(40, 40, 50));
 
           return;
       }
@@ -902,13 +980,13 @@ display:
       if (mode == "AGENT_BASH") {
           int bash_frame = (millis() / 100) % 30;
 
-          // Terminal background
-          it.filled_rectangle(10, 10, 220, 115, Color(10, 10, 15));
-          it.rectangle(10, 10, 220, 115, ORANGE);
+          // Terminal background with subtle gradient
+          it.filled_rectangle(5, 5, 230, 125, Color(15, 15, 20));
+          it.rectangle(5, 5, 230, 125, ORANGE);
 
           // Terminal title bar
-          it.filled_rectangle(10, 10, 220, 18, Color(40, 30, 20));
-          it.print(120, 12, id(font_small), ORANGE, TextAlign::TOP_CENTER, "TERMINAL");
+          it.filled_rectangle(5, 5, 230, 20, Color(50, 35, 15));
+          it.print(120, 8, id(font_body), ORANGE, TextAlign::TOP_CENTER, "TERMINAL");
 
           // Parse message: line1 is command name, line2 is full command
           std::string line1 = msg;
@@ -919,35 +997,39 @@ display:
               line2 = msg.substr(nl + 1);
           }
 
-          // Command name (short) - truncate to fit after "$"
-          if (line1.length() > 24) line1 = line1.substr(0, 24);
-          it.print(20, 35, id(font_body), LIME, TextAlign::TOP_LEFT, "$");
-          it.print(35, 35, id(font_body), CYAN, TextAlign::TOP_LEFT, line1.c_str());
+          // Command name - LARGE and prominent
+          if (line1.length() > 20) line1 = line1.substr(0, 20);
+          it.print(15, 32, id(font_body), LIME, TextAlign::TOP_LEFT, "$");
+          it.print(30, 32, id(font_body), CYAN, TextAlign::TOP_LEFT, line1.c_str());
 
-          // Full command preview (scrolling if long)
+          // Full command preview - USE BODY FONT for readability!
           if (!line2.empty()) {
-              // Scroll long commands
+              // Scroll long commands - show 22 chars max
               int scroll_offset = 0;
-              if (line2.length() > 26) {
-                  int total_scroll = line2.length() - 24;
-                  scroll_offset = (bash_frame / 3) % (total_scroll + 10);
+              if (line2.length() > 22) {
+                  int total_scroll = line2.length() - 20;
+                  scroll_offset = (bash_frame / 3) % (total_scroll + 8);
                   if (scroll_offset > total_scroll) scroll_offset = 0;
               }
-              std::string visible = line2.substr(scroll_offset, 26);
-              it.print(20, 58, id(font_small), DIM, TextAlign::TOP_LEFT, visible.c_str());
+              std::string visible = line2.substr(scroll_offset, 22);
+              // Dim orange for the full command - readable!
+              it.print(15, 55, id(font_body), Color(180, 120, 60), TextAlign::TOP_LEFT, visible.c_str());
           }
 
-          // Running indicator with animated dots
+          // Running indicator - LARGER with animated dots
           std::string dots = "";
           for (int i = 0; i < (bash_frame / 5) % 4; i++) dots += ".";
-          it.print(20, 80, id(font_small), Color(80, 80, 80), TextAlign::TOP_LEFT, ("Running" + dots).c_str());
+          it.print(15, 82, id(font_body), Color(100, 100, 100), TextAlign::TOP_LEFT, ("Running" + dots).c_str());
 
-          // Blinking cursor at end of command name
+          // Animated cursor block
           if (bash_frame < 15) {
-              int cursor_x = 35 + line1.length() * 8;
-              if (cursor_x > 200) cursor_x = 200;
-              it.filled_rectangle(cursor_x, 35, 2, 14, ORANGE);
+              int cursor_x = 90;
+              it.filled_rectangle(cursor_x, 82, 10, 16, ORANGE);
           }
+
+          // Progress bar at bottom
+          int bar_width = (bash_frame * 8) % 210;
+          it.filled_rectangle(15, 110, bar_width, 6, Color(80, 50, 20));
 
           return;
       }
@@ -956,32 +1038,44 @@ display:
       if (mode == "AGENT_SEARCH") {
           int search_frame = (millis() / 80) % 40;
 
-          // Scanning lines animation
-          for (int i = 0; i < 10; i++) {
-              int y = ((i * 13 + search_frame * 4) % 135);
-              int alpha = 255 - abs(67 - y) * 3;
-              if (alpha < 30) alpha = 30;
+          // Purple header bar
+          it.filled_rectangle(0, 0, 240, 22, PURPLE);
+          it.print(120, 4, id(font_body), Color::WHITE, TextAlign::TOP_CENTER, "SEARCHING");
+
+          // Scanning lines animation - in content area
+          for (int i = 0; i < 6; i++) {
+              int y = 30 + ((i * 15 + search_frame * 3) % 70);
+              int alpha = 200 - abs(60 - y) * 2;
+              if (alpha < 40) alpha = 40;
               Color line_color = Color(147 * alpha / 255, 112 * alpha / 255, 219 * alpha / 255);
-              it.line(20, y, 220, y, line_color);
+              it.line(100, y, 230, y, line_color);
           }
 
-          // Magnifying glass icon
+          // Magnifying glass icon (left side)
           int glass_bounce = abs((search_frame % 20) - 10) / 3;
-          it.circle(50, 55 + glass_bounce, 15, PURPLE);
-          it.circle(50, 55 + glass_bounce, 14, PURPLE);
-          it.line(60, 65 + glass_bounce, 75, 80 + glass_bounce, PURPLE);
-          it.line(61, 66 + glass_bounce, 76, 81 + glass_bounce, PURPLE);
+          it.circle(45, 55 + glass_bounce, 18, PURPLE);
+          it.circle(45, 55 + glass_bounce, 17, PURPLE);
+          it.line(58, 68 + glass_bounce, 75, 85 + glass_bounce, PURPLE);
+          it.line(59, 69 + glass_bounce, 76, 86 + glass_bounce, PURPLE);
 
-          // Search text
+          // Search pattern - LARGER
           std::string line1 = msg.substr(0, msg.find('\n'));
-          if (line1.length() > 20) line1 = line1.substr(0, 20) + "...";
-          it.print(140, 50, id(font_body), PURPLE, TextAlign::CENTER, line1.c_str());
+          if (line1.length() > 16) line1 = line1.substr(0, 16) + "..";
+          it.print(160, 45, id(font_body), Color::WHITE, TextAlign::CENTER, line1.c_str());
 
+          // File pattern - USE BODY FONT
           std::string line2 = "";
           if (msg.find('\n') != std::string::npos) {
               line2 = msg.substr(msg.find('\n') + 1);
+              if (line2.length() > 18) line2 = line2.substr(0, 18);
           }
-          it.print(140, 75, id(font_small), DIM, TextAlign::CENTER, line2.c_str());
+          it.print(160, 70, id(font_body), Color(120, 100, 160), TextAlign::CENTER, line2.c_str());
+
+          // Progress dots at bottom
+          for (int i = 0; i < 5; i++) {
+              Color dot_c = (i <= (search_frame / 8) % 5) ? PURPLE : Color(50, 40, 70);
+              it.filled_circle(90 + i * 15, 115, 4, dot_c);
+          }
 
           return;
       }
@@ -990,32 +1084,46 @@ display:
       if (mode == "AGENT_WEB") {
           int web_frame = (millis() / 60) % 60;
 
-          // Globe animation (spinning dots)
+          // Cyan header bar
+          it.filled_rectangle(0, 0, 240, 22, CYAN);
+          it.print(120, 4, id(font_body), Color::BLACK, TextAlign::TOP_CENTER, "WEB");
+
+          // Globe animation (spinning dots) - left side
           for (int i = 0; i < 12; i++) {
               float angle = (i * 30 + web_frame * 6) * 3.14159 / 180;
-              int x = 50 + cos(angle) * 25;
-              int y = 55 + sin(angle) * 15;
+              int x = 45 + cos(angle) * 22;
+              int y = 60 + sin(angle) * 14;
               Color dot_color = (i % 2 == 0) ? CYAN : TEAL;
               it.filled_circle(x, y, 3, dot_color);
           }
-          it.circle(50, 55, 25, CYAN);
-          it.line(25, 55, 75, 55, TEAL);
-          it.line(50, 30, 50, 80, TEAL);
+          it.circle(45, 60, 22, CYAN);
+          it.line(23, 60, 67, 60, TEAL);
+          it.line(45, 38, 45, 82, TEAL);
 
-          // URL/query text
+          // URL/query text - LARGER
           std::string line1 = msg.substr(0, msg.find('\n'));
-          it.print(150, 45, id(font_body), CYAN, TextAlign::CENTER, line1.c_str());
+          if (line1.length() > 14) line1 = line1.substr(0, 14);
+          it.print(155, 40, id(font_body), Color::WHITE, TextAlign::CENTER, line1.c_str());
 
+          // URL preview - USE BODY FONT
           std::string line2 = "";
           if (msg.find('\n') != std::string::npos) {
               line2 = msg.substr(msg.find('\n') + 1);
-              if (line2.length() > 20) line2 = line2.substr(0, 20) + "...";
+              if (line2.length() > 16) {
+                  // Scroll long URLs
+                  int scroll = (web_frame / 4) % (line2.length() - 14);
+                  line2 = line2.substr(scroll, 16);
+              }
           }
-          it.print(150, 70, id(font_small), DIM, TextAlign::CENTER, line2.c_str());
+          it.print(155, 65, id(font_body), Color(100, 180, 180), TextAlign::CENTER, line2.c_str());
 
-          // Loading bar
-          int bar_pos = (web_frame * 4) % 200;
-          it.filled_rectangle(20 + bar_pos, 105, 30, 6, CYAN);
+          // Loading bar - animated bounce
+          int bar_pos = (web_frame * 4) % 180;
+          it.filled_rectangle(30, 100, 180, 8, Color(20, 50, 50));
+          it.filled_rectangle(30 + bar_pos, 100, 40, 8, CYAN);
+
+          // Fetching text
+          it.print(120, 115, id(font_body), TEAL, TextAlign::CENTER, "Fetching...");
 
           return;
       }
@@ -1024,24 +1132,40 @@ display:
       if (mode == "AGENT_SUB") {
           int sub_frame = (millis() / 100) % 30;
 
-          // Multiple bouncing agents (dots)
-          Color agent_colors[] = {PINK, PURPLE, CYAN, LIME};
-          for (int i = 0; i < 4; i++) {
-              int bounce = abs(((sub_frame + i * 7) % 20) - 10);
-              int x = 40 + i * 50;
-              it.filled_circle(x, 50 + bounce, 8, agent_colors[i]);
-              it.filled_circle(x - 2, 48 + bounce, 2, Color::WHITE);  // Highlight
+          // Distinctive pink/purple header bar
+          it.filled_rectangle(0, 0, 240, 25, PINK);
+          it.print(120, 5, id(font_body), Color::BLACK, TextAlign::TOP_CENTER, "SUB-AGENT");
+
+          // Multiple bouncing agents (dots) - smaller, in a row
+          Color agent_colors[] = {PURPLE, CYAN, LIME, AMBER, PINK};
+          for (int i = 0; i < 5; i++) {
+              int bounce = abs(((sub_frame + i * 5) % 16) - 8);
+              int x = 30 + i * 45;
+              it.filled_circle(x, 42 + bounce, 6, agent_colors[i]);
+              it.filled_circle(x - 1, 40 + bounce, 2, Color::WHITE);  // Highlight
           }
 
-          // Agent type text
+          // Agent type text - LARGE
           std::string line1 = msg.substr(0, msg.find('\n'));
-          it.print(120, 80, id(font_body), PINK, TextAlign::CENTER, line1.c_str());
+          if (line1.length() > 22) line1 = line1.substr(0, 22);
+          it.print(120, 60, id(font_body), PURPLE, TextAlign::CENTER, line1.c_str());
 
+          // Description - USE BODY FONT for readability
           std::string line2 = "";
           if (msg.find('\n') != std::string::npos) {
               line2 = msg.substr(msg.find('\n') + 1);
+              if (line2.length() > 24) {
+                  // Scroll long descriptions
+                  int scroll = (sub_frame / 2) % (line2.length() - 22);
+                  line2 = line2.substr(scroll, 24);
+              }
           }
-          it.print(120, 100, id(font_small), DIM, TextAlign::CENTER, line2.c_str());
+          it.print(120, 85, id(font_body), Color(150, 150, 150), TextAlign::CENTER, line2.c_str());
+
+          // Working indicator at bottom
+          std::string dots = "";
+          for (int i = 0; i < (sub_frame / 6) % 4; i++) dots += ".";
+          it.print(120, 110, id(font_body), PINK, TextAlign::CENTER, ("Working" + dots).c_str());
 
           return;
       }
@@ -1050,27 +1174,35 @@ display:
       if (mode == "AGENT_PLAN") {
           int plan_frame = (millis() / 200) % 10;
 
+          // Amber header bar
+          it.filled_rectangle(0, 0, 240, 22, AMBER);
+          it.print(120, 4, id(font_body), Color::BLACK, TextAlign::TOP_CENTER, "PLANNING");
+
           // Checklist animation
-          it.filled_rectangle(30, 20, 180, 100, Color(20, 20, 15));
-          it.rectangle(30, 20, 180, 100, AMBER);
+          it.filled_rectangle(25, 28, 190, 80, Color(25, 25, 18));
+          it.rectangle(25, 28, 190, 80, Color(100, 80, 30));
 
           // Checkboxes appearing
           int visible_boxes = (plan_frame % 4) + 1;
-          for (int i = 0; i < visible_boxes && i < 4; i++) {
-              int y = 30 + i * 22;
-              it.rectangle(45, y, 14, 14, AMBER);
+          for (int i = 0; i < visible_boxes && i < 3; i++) {
+              int y = 35 + i * 24;
+              it.rectangle(40, y, 16, 16, AMBER);
               if (i < visible_boxes - 1) {
-                  // Checked
-                  it.line(48, y + 7, 52, y + 11, LIME);
-                  it.line(52, y + 11, 58, y + 3, LIME);
+                  // Checked with thicker lines
+                  it.line(43, y + 8, 48, y + 13, LIME);
+                  it.line(44, y + 8, 49, y + 13, LIME);
+                  it.line(48, y + 13, 55, y + 3, LIME);
+                  it.line(49, y + 13, 56, y + 3, LIME);
               }
-              // Line placeholder
-              int line_w = 80 + (i * 20) % 40;
-              it.filled_rectangle(70, y + 4, line_w, 6, Color(60, 60, 50));
+              // Line placeholder - simulated text
+              int line_w = 100 + (i * 25) % 50;
+              it.filled_rectangle(65, y + 5, line_w, 8, Color(80, 70, 40));
           }
 
-          // Planning text
-          it.print(120, 125, id(font_small), AMBER, TextAlign::CENTER, msg.c_str());
+          // Planning text - USE BODY FONT
+          std::string plan_msg = msg;
+          if (plan_msg.length() > 26) plan_msg = plan_msg.substr(0, 26);
+          it.print(120, 115, id(font_body), AMBER, TextAlign::CENTER, plan_msg.c_str());
 
           return;
       }
@@ -1079,156 +1211,156 @@ display:
       if (mode == "AGENT_READ") {
           int read_frame = (millis() / 50) % 40;
 
-          // Page turning effect - simulated text lines scrolling
-          for (int i = 0; i < 8; i++) {
-              int y = 25 + i * 12;
-              int offset = (read_frame + i * 3) % 20;
-              int width = 140 + (offset * 3) - (i * 5);
-              if (width > 180) width = 180;
-              if (width < 60) width = 60;
-              int alpha = 200 - i * 20;
-              Color line_color = Color(50 * alpha / 255, 100 * alpha / 255, 200 * alpha / 255);
-              it.filled_rectangle(30, y, width, 6, line_color);
+          // Blue header bar
+          Color READ_BLUE = Color(80, 130, 220);
+          it.filled_rectangle(0, 0, 240, 22, READ_BLUE);
+          it.print(120, 4, id(font_body), Color::WHITE, TextAlign::TOP_CENTER, "READING");
+
+          // Page/document visual with scrolling text lines
+          it.filled_rectangle(30, 28, 180, 75, Color(15, 20, 30));
+          it.rectangle(30, 28, 180, 75, Color(60, 100, 180));
+
+          for (int i = 0; i < 5; i++) {
+              int y = 35 + i * 13;
+              int offset = (read_frame + i * 4) % 25;
+              int width = 120 + (offset * 2) - (i * 8);
+              if (width > 160) width = 160;
+              if (width < 50) width = 50;
+              int alpha = 220 - i * 35;
+              Color line_color = Color(40 * alpha / 255, 80 * alpha / 255, 160 * alpha / 255);
+              it.filled_rectangle(40, y, width, 7, line_color);
           }
 
-          // File name
+          // File name - USE BODY FONT, prominent
           std::string filename = msg;
-          if (filename.length() > 25) filename = "..." + filename.substr(filename.length() - 22);
-          it.print(120, 115, id(font_body), Color(100, 150, 255), TextAlign::CENTER, filename.c_str());
+          if (filename.length() > 24) filename = ".." + filename.substr(filename.length() - 22);
+          it.print(120, 110, id(font_body), READ_BLUE, TextAlign::CENTER, filename.c_str());
 
           return;
       }
 
-      // === AGENT MODE - Claude Code is working ===
+      // === AGENT MODE - Claude Code is working (background agents, generic tasks) ===
       if (mode == "AGENT") {
           int code_frame = (millis() / 80) % 40;  // Fast animation
 
-          // Matrix-style falling code effect
+          // Cyan header bar
+          it.filled_rectangle(0, 0, 240, 22, CYAN);
+          it.print(120, 4, id(font_body), Color::BLACK, TextAlign::TOP_CENTER, "WORKING");
+
+          // Matrix-style falling code effect (in background)
           for (int col = 0; col < 12; col++) {
             int offset = (col * 7 + code_frame * 3) % 40;
-            for (int row = 0; row < 6; row++) {
-              int y = (row * 22 + offset) % 135;
-              int brightness = 255 - (row * 40);
-              if (brightness < 50) brightness = 50;
+            for (int row = 0; row < 5; row++) {
+              int y = 25 + (row * 20 + offset) % 90;
+              int brightness = 180 - (row * 30);
+              if (brightness < 40) brightness = 40;
               Color code_color = Color(0, brightness, brightness / 2);
-              // Random "characters" (just rectangles of varying sizes)
               int char_w = 3 + ((col + row + code_frame) % 4);
-              it.filled_rectangle(20 + col * 18, y, char_w, 8, code_color);
+              it.filled_rectangle(20 + col * 18, y, char_w, 7, code_color);
             }
           }
 
-          // Agent status overlay
-          it.filled_rectangle(40, 45, 160, 50, Color(0, 0, 0));
-          it.rectangle(40, 45, 160, 50, CYAN);
-
-          // Show what's happening
-          it.print(120, 55, id(font_body), CYAN, TextAlign::CENTER, "AGENT ACTIVE");
-
-          // Tool name from display text
-          if (!msg.empty() && msg != "CLAWDBOT READY") {
-            std::string tool_display = msg.substr(0, 18);
-            it.print(120, 78, id(font_small), LIME, TextAlign::CENTER, tool_display.c_str());
-          } else {
-            it.print(120, 78, id(font_small), DIM, TextAlign::CENTER, "Working...");
+          // Parse message for tool info
+          std::string line1 = msg;
+          std::string line2 = "";
+          size_t nl = msg.find('\n');
+          if (nl != std::string::npos) {
+              line1 = msg.substr(0, nl);
+              line2 = msg.substr(nl + 1);
           }
 
-          // Bouncing ball animation (Pixar style!)
-          // Ball position bounces with easing
-          float ball_time = (millis() % 1200) / 1200.0;  // 1.2s cycle
-          float bounce_height;
-          if (ball_time < 0.5) {
-              // Going up (ease out)
-              float t = ball_time * 2.0;
-              bounce_height = 1.0 - (1.0 - t) * (1.0 - t);
+          // Semi-transparent overlay for text readability
+          it.filled_rectangle(15, 45, 210, 55, Color(0, 20, 25));
+          it.rectangle(15, 45, 210, 55, CYAN);
+
+          // Main status - what's happening
+          if (!line1.empty() && line1 != "CLAWDBOT READY") {
+              if (line1.length() > 22) line1 = line1.substr(0, 22);
+              it.print(120, 52, id(font_body), CYAN, TextAlign::CENTER, line1.c_str());
           } else {
-              // Coming down (ease in)
-              float t = (ball_time - 0.5) * 2.0;
-              bounce_height = 1.0 - t * t;
+              it.print(120, 52, id(font_body), CYAN, TextAlign::CENTER, "Agent Active");
           }
 
-          int ball_y = 30 + (int)(bounce_height * 15);  // Bounce 15 pixels
-          int ball_size = 8 - (int)(bounce_height * 2);  // Squash on impact
+          // Detail line - USE BODY FONT for readability
+          if (!line2.empty()) {
+              if (line2.length() > 24) {
+                  // Scroll long text
+                  int scroll = (code_frame / 3) % (line2.length() - 22);
+                  line2 = line2.substr(scroll, 24);
+              }
+              it.print(120, 76, id(font_body), Color(100, 160, 160), TextAlign::CENTER, line2.c_str());
+          } else {
+              it.print(120, 76, id(font_body), Color(80, 120, 120), TextAlign::CENTER, "Processing...");
+          }
 
-          // Shadow (gets bigger when ball is higher)
-          int shadow_y = 48;
-          int shadow_w = 12 + (int)(bounce_height * 8);
-          it.filled_rectangle(20 - shadow_w / 2, shadow_y, shadow_w, 2, Color(0, 50, 50, 100));
-
-          // Ball with gradient (brighter at top)
-          Color ball_color = Color(0, 200 + (int)(bounce_height * 55), 255);
-          it.filled_circle(20, ball_y, ball_size, ball_color);
-          // Highlight
-          it.filled_circle(20 - 2, ball_y - 2, 2, Color(150, 255, 255));
+          // Bouncing dots at bottom for activity indicator
+          Color dot_colors[] = {CYAN, TEAL, LIME, CYAN};
+          for (int i = 0; i < 4; i++) {
+              int bounce = abs(((code_frame + i * 8) % 24) - 12) / 3;
+              int x = 90 + i * 20;
+              it.filled_circle(x, 115 - bounce, 5, dot_colors[i]);
+          }
 
           return;
       }
 
-      // === IDLE / HOME SCREEN - Clean with accent ===
+      // === IDLE / HOME SCREEN - Polished watch-style display ===
       if (mode == "IDLE" || msg == "CLAWDBOT READY" || msg.empty()) {
-          // Cute robot eyes that blink occasionally
-          int blink_cycle = (millis() / 100) % 50;  // Every 5 seconds
-          bool is_blinking = (blink_cycle < 2);  // Blink for 200ms
+          int idle_frame = (millis() / 100) % 100;
 
-          // Left eye
-          int left_eye_x = 30;
-          int left_eye_y = 15;
-          if (is_blinking) {
-              // Closed (just a line)
-              it.line(left_eye_x - 5, left_eye_y, left_eye_x + 5, left_eye_y, CYAN);
-          } else {
-              // Open (circle with pupil)
-              it.filled_circle(left_eye_x, left_eye_y, 6, Color(20, 20, 40));
-              it.circle(left_eye_x, left_eye_y, 6, CYAN);
-              it.filled_circle(left_eye_x, left_eye_y, 3, CYAN);
-              it.filled_circle(left_eye_x - 1, left_eye_y - 1, 1, Color(150, 255, 255));
+          // Subtle animated gradient header
+          int gradient_shift = (idle_frame / 2) % 20;
+          for (int i = 0; i < 20; i++) {
+              int brightness = 20 + ((i + gradient_shift) % 20) * 2;
+              it.line(0, i, 240, i, Color(0, brightness, brightness));
           }
 
-          // Right eye
-          int right_eye_x = 210;
-          int right_eye_y = 15;
-          if (is_blinking) {
-              it.line(right_eye_x - 5, right_eye_y, right_eye_x + 5, right_eye_y, CYAN);
-          } else {
-              it.filled_circle(right_eye_x, right_eye_y, 6, Color(20, 20, 40));
-              it.circle(right_eye_x, right_eye_y, 6, CYAN);
-              it.filled_circle(right_eye_x, right_eye_y, 3, CYAN);
-              it.filled_circle(right_eye_x - 1, right_eye_y - 1, 1, Color(150, 255, 255));
+          // "CLAWD" branding - centered, prominent
+          it.print(120, 5, id(font_body), CYAN, TextAlign::TOP_CENTER, "CLAWD");
+
+          // Large clock - crisp white, centered
+          it.strftime(120, 38, id(font_large), Color::WHITE, TextAlign::CENTER, "%H:%M", id(sntp_time).now());
+
+          // Seconds indicator - small dots that fill up
+          int seconds = id(sntp_time).now().second;
+          int filled_dots = seconds / 10;  // 6 dots, one per 10 seconds
+          for (int i = 0; i < 6; i++) {
+              int x = 75 + i * 18;
+              Color dot_c = (i < filled_dots) ? CYAN : Color(40, 40, 50);
+              it.filled_circle(x, 75, 3, dot_c);
           }
 
-          // Subtle top accent line
-          it.line(40, 8, 200, 8, TEAL);
+          // Date below clock
+          it.strftime(120, 85, id(font_body), Color(120, 120, 140), TextAlign::CENTER, "%a %b %d", id(sntp_time).now());
 
-          // Large clock - white for readability
-          it.strftime(120, 45, id(font_large), Color::WHITE, TextAlign::CENTER, "%H:%M", id(sntp_time).now());
-
-          // Accent divider
-          it.line(60, 78, 180, 78, CYAN);
-
-          // Weather in teal if available
+          // Weather (if available) - with icon placeholder
           std::string weather = id(weather_display).state;
           if (!weather.empty()) {
-            it.print(120, 92, id(font_body), TEAL, TextAlign::CENTER, weather.c_str());
+              if (weather.length() > 20) weather = weather.substr(0, 20);
+              it.print(120, 105, id(font_body), TEAL, TextAlign::CENTER, weather.c_str());
           }
 
-          // Bottom status bar
+          // Bottom status bar with battery
           if (id(battery_level).has_state()) {
-            float batt = id(battery_level).state;
-            Color batt_color = (batt > 50) ? LIME : ((batt > 20) ? AMBER : RED);
-            it.printf(120, 120, id(font_small), batt_color, TextAlign::CENTER, "%.0f%%", batt);
+              float batt = id(battery_level).state;
+              Color batt_color = (batt > 50) ? LIME : ((batt > 20) ? AMBER : RED);
 
-            // Battery bar
-            int bar_width = (batt / 100.0) * 40;
-            it.rectangle(100, 130, 40, 4, DIM);
-            it.filled_rectangle(100, 130, bar_width, 4, batt_color);
+              // Battery icon outline
+              it.rectangle(95, 122, 40, 12, batt_color);
+              it.filled_rectangle(135, 125, 3, 6, batt_color);  // Nub
+
+              // Battery fill
+              int fill_width = (int)(batt / 100.0 * 36);
+              it.filled_rectangle(97, 124, fill_width, 8, batt_color);
+
+              // Percentage next to battery
+              it.printf(145, 122, id(font_body), batt_color, TextAlign::TOP_LEFT, "%.0f%%", batt);
           }
 
-          // Connection pulse - cyan
-          if (id(pulse_state)) {
-            it.filled_circle(120, 4, 2, CYAN);
-          }
+          // Connection status indicator (top right)
+          Color conn_color = id(pulse_state) ? LIME : Color(30, 80, 30);
+          it.filled_circle(225, 10, 4, conn_color);
 
-          // Lobster icon hint (small)
-          it.print(10, 120, id(font_small), CORAL, TextAlign::TOP_LEFT, ">");
           return;
       }
 

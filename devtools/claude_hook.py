@@ -28,7 +28,7 @@ BRIDGE_URL = os.environ.get("BRIDGE_URL", f"http://{PI_HOST}:8081")
 
 
 def send_to_bridge(event_data: dict):
-    """Send rich event data to the bridge."""
+    """Send rich event data to the bridge (fire-and-forget with short timeout)."""
     try:
         req = urllib.request.Request(
             f"{BRIDGE_URL}/agent",
@@ -36,9 +36,12 @@ def send_to_bridge(event_data: dict):
             headers={"Content-Type": "application/json"},
             method="POST"
         )
-        urllib.request.urlopen(req, timeout=2)
+        # Very short timeout - we don't need to wait for response
+        # Just fire and continue, don't block the tool
+        urllib.request.urlopen(req, timeout=0.5)
         return True
     except Exception:
+        # Silent fail - don't slow down Claude Code
         return False
 
 
@@ -71,22 +74,39 @@ def extract_tool_details(tool_name: str, tool_input: dict) -> dict:
 
         old_lines = count_lines(old_str)
         new_lines = count_lines(new_str)
-        diff = new_lines - old_lines
+        added = new_lines
+        removed = old_lines
 
         filename = get_filename(file_path)
+        details["display_text"] = f"{filename}"
 
-        if diff > 0:
-            details["display_text"] = f"EDIT {filename}"
-            details["display_sub"] = f"+{diff} lines"
+        # Show both added and removed
+        if added > 0 and removed > 0:
+            details["display_sub"] = f"+{added} -{removed}"
+            if added > removed:
+                details["color"] = "green"
+            elif removed > added:
+                details["color"] = "red"
+            else:
+                details["color"] = "yellow"
+        elif added > 0:
+            details["display_sub"] = f"+{added}"
             details["color"] = "green"
-        elif diff < 0:
-            details["display_text"] = f"EDIT {filename}"
-            details["display_sub"] = f"{diff} lines"
+        elif removed > 0:
+            details["display_sub"] = f"-{removed}"
             details["color"] = "red"
         else:
-            details["display_text"] = f"EDIT {filename}"
-            details["display_sub"] = f"~{new_lines} lines"
+            details["display_sub"] = "~"
             details["color"] = "yellow"
+
+        # For small changes, include the actual code snippet
+        total_lines = added + removed
+        if total_lines <= 5 and new_str:
+            # Clean up the code for display (first meaningful line)
+            preview_lines = [l.strip() for l in new_str.split('\n') if l.strip()]
+            if preview_lines:
+                preview = preview_lines[0][:40]
+                details["code_preview"] = preview
 
         details["display_mode"] = "EDIT"
 
