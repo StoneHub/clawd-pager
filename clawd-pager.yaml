@@ -575,13 +575,28 @@ display:
             Color(255, 100, 200)   // Pink
           };
 
-          // Bouncing dots in a wave
+          // Bouncing dots in a wave with shadows and glow
           for (int i = 0; i < 8; i++) {
             int bounce = abs(((frame * 2 + i * 5) % 30) - 15);
             int x = 50 + i * 22;
             int y = 55 + bounce;
             int size = 6 + (bounce / 5);
+
+            // Shadow below (gets bigger when higher)
+            int shadow_y = 70;
+            int shadow_w = (size + 2) * 2;
+            it.filled_rectangle(x - shadow_w / 2, shadow_y, shadow_w, 2, Color(0, 0, 0, 100));
+
+            // Glow/halo effect
+            Color glow_color = dot_colors[i];
+            glow_color.r /= 3; glow_color.g /= 3; glow_color.b /= 3;
+            it.filled_circle(x, y, size + 2, glow_color);
+
+            // Main dot
             it.filled_circle(x, y, size, dot_colors[i]);
+
+            // Highlight
+            it.filled_circle(x - 1, y - 1, 2, Color(255, 255, 255));
           }
 
           it.print(120, 100, id(font_body), AMBER, TextAlign::CENTER, "PROCESSING");
@@ -773,16 +788,69 @@ display:
             it.print(120, 78, id(font_small), DIM, TextAlign::CENTER, "Working...");
           }
 
-          // Spinning indicator in corner
-          int spin = code_frame % 8;
-          const char* spinner[] = {"|", "/", "-", "\\", "|", "/", "-", "\\"};
-          it.print(215, 5, id(font_body), CYAN, TextAlign::TOP_RIGHT, spinner[spin]);
+          // Bouncing ball animation (Pixar style!)
+          // Ball position bounces with easing
+          float ball_time = (millis() % 1200) / 1200.0;  // 1.2s cycle
+          float bounce_height;
+          if (ball_time < 0.5) {
+              // Going up (ease out)
+              float t = ball_time * 2.0;
+              bounce_height = 1.0 - (1.0 - t) * (1.0 - t);
+          } else {
+              // Coming down (ease in)
+              float t = (ball_time - 0.5) * 2.0;
+              bounce_height = 1.0 - t * t;
+          }
+
+          int ball_y = 30 + (int)(bounce_height * 15);  // Bounce 15 pixels
+          int ball_size = 8 - (int)(bounce_height * 2);  // Squash on impact
+
+          // Shadow (gets bigger when ball is higher)
+          int shadow_y = 48;
+          int shadow_w = 12 + (int)(bounce_height * 8);
+          it.filled_rectangle(20 - shadow_w / 2, shadow_y, shadow_w, 2, Color(0, 50, 50, 100));
+
+          // Ball with gradient (brighter at top)
+          Color ball_color = Color(0, 200 + (int)(bounce_height * 55), 255);
+          it.filled_circle(20, ball_y, ball_size, ball_color);
+          // Highlight
+          it.filled_circle(20 - 2, ball_y - 2, 2, Color(150, 255, 255));
 
           return;
       }
 
       // === IDLE / HOME SCREEN - Clean with accent ===
       if (mode == "IDLE" || msg == "CLAWDBOT READY" || msg.empty()) {
+          // Cute robot eyes that blink occasionally
+          int blink_cycle = (millis() / 100) % 50;  // Every 5 seconds
+          bool is_blinking = (blink_cycle < 2);  // Blink for 200ms
+
+          // Left eye
+          int left_eye_x = 30;
+          int left_eye_y = 15;
+          if (is_blinking) {
+              // Closed (just a line)
+              it.line(left_eye_x - 5, left_eye_y, left_eye_x + 5, left_eye_y, CYAN);
+          } else {
+              // Open (circle with pupil)
+              it.filled_circle(left_eye_x, left_eye_y, 6, Color(20, 20, 40));
+              it.circle(left_eye_x, left_eye_y, 6, CYAN);
+              it.filled_circle(left_eye_x, left_eye_y, 3, CYAN);
+              it.filled_circle(left_eye_x - 1, left_eye_y - 1, 1, Color(150, 255, 255));
+          }
+
+          // Right eye
+          int right_eye_x = 210;
+          int right_eye_y = 15;
+          if (is_blinking) {
+              it.line(right_eye_x - 5, right_eye_y, right_eye_x + 5, right_eye_y, CYAN);
+          } else {
+              it.filled_circle(right_eye_x, right_eye_y, 6, Color(20, 20, 40));
+              it.circle(right_eye_x, right_eye_y, 6, CYAN);
+              it.filled_circle(right_eye_x, right_eye_y, 3, CYAN);
+              it.filled_circle(right_eye_x - 1, right_eye_y - 1, 1, Color(150, 255, 255));
+          }
+
           // Subtle top accent line
           it.line(40, 8, 200, 8, TEAL);
 
