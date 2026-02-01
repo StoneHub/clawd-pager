@@ -6,10 +6,11 @@ esphome:
   on_boot:
     priority: -10
     then:
-      - rtttl.play: "Startup:d=4,o=5,b=180:c,e,g,c6"
+      # Fun Mario-style startup jingle!
+      - rtttl.play: "Mario:d=4,o=5,b=200:e6,8e6,8e6,8c6,e6,g6,g"
       - text_sensor.template.publish:
           id: pager_display
-          state: "CLAWDBOT READY"
+          state: "LOBSTER READY!"
       - text_sensor.template.publish:
           id: display_mode
           state: "IDLE"
@@ -202,72 +203,74 @@ binary_sensor:
                   id: display_mode
                   state: "IDLE"
 
-  # Button A - Briefing / Sleep countdown
+  # Button A - YES / CONFIRM / VOICE (hold)
+  # New ergonomic layout: A is the main action button
   - platform: gpio
     pin:
       number: GPIO37
       inverted: true
     name: "Button A"
     id: button_a
-    on_press:
-      then:
-        - rtttl.play: "Blip:d=32,o=6,b=150:c6"
-        - globals.set:
-            id: btn_a_pressed
-            value: 'true'
-        - script.execute: activity_watcher
-        - lambda: |-
-            if (id(dev_mode)) {
-              id(event_seq)++;
-              ESP_LOGI("EVENT", "[%d] BUTTON_A_PRESS | mode=%s", id(event_seq), id(display_mode).state.c_str());
-            }
-    on_release:
-      then:
-        - globals.set:
-            id: btn_a_pressed
-            value: 'false'
-        - lambda: |-
-            if (id(dev_mode)) {
-              id(event_seq)++;
-              ESP_LOGI("EVENT", "[%d] BUTTON_A_RELEASE", id(event_seq));
-            }
-
-  # Button B - Voice / Home
-  - platform: gpio
-    pin:
-      number: GPIO39
-      inverted: true
-    name: "Button B"
-    id: button_b
     on_multi_click:
-      # Short tap (< 400ms) = Go home / Cancel
+      # Short tap = Context-aware action
       - timing:
           - ON for at most 400ms
           - OFF for at least 50ms
         then:
-          - rtttl.play: "Back:d=32,o=5,b=150:c"
           - lambda: |-
+              std::string mode = id(display_mode).state;
               if (id(dev_mode)) {
                 id(event_seq)++;
-                ESP_LOGI("EVENT", "[%d] BUTTON_B_TAP | action=HOME", id(event_seq));
+                ESP_LOGI("EVENT", "[%d] BUTTON_A_TAP | mode=%s", id(event_seq), mode.c_str());
               }
-          - text_sensor.template.publish:
-              id: display_mode
-              state: "IDLE"
-          - text_sensor.template.publish:
-              id: pager_display
-              state: "CLAWDBOT READY"
           - script.execute: activity_watcher
-      # Long hold (> 400ms) = Voice recording
+          - if:
+              condition:
+                lambda: 'return id(display_mode).state == "QUESTION";'
+              then:
+                # YES response - Zelda "item get" style!
+                - rtttl.play: "Yes:d=16,o=5,b=200:g,c6,e6,g6,8e6,8g6"
+                - text_sensor.template.publish:
+                    id: pager_display
+                    state: "YES!"
+                - text_sensor.template.publish:
+                    id: display_mode
+                    state: "RESPONSE"
+          - if:
+              condition:
+                lambda: 'return id(display_mode).state == "CONFIRM";'
+              then:
+                # SEND - whoosh sound!
+                - rtttl.play: "Send:d=32,o=5,b=300:c,d,e,f,g,a,b,c6,d6,e6"
+                - text_sensor.template.publish:
+                    id: pager_display
+                    state: "SENDING..."
+                - text_sensor.template.publish:
+                    id: display_mode
+                    state: "PROCESSING"
+          - if:
+              condition:
+                lambda: 'return id(display_mode).state == "IDLE" || id(display_mode).state == "DOCKED";'
+              then:
+                # Get STATUS from Clawdbot
+                - rtttl.play: "Blip:d=32,o=6,b=150:c6"
+                - text_sensor.template.publish:
+                    id: pager_display
+                    state: "Getting status..."
+                - text_sensor.template.publish:
+                    id: display_mode
+                    state: "PROCESSING"
+      # Long hold (400ms+) = VOICE recording
       - timing:
           - ON for at least 400ms
         then:
-          - rtttl.play: "Voice:d=32,o=6,b=150:g,c7"
+          # Fun "listening" chirp!
+          - rtttl.play: "Listen:d=16,o=6,b=200:c,g,c7"
           - delay: 100ms
           # CRITICAL: Stop buzzer before recording - they share resources!
           - output.turn_off: buzzer_pwm
           - globals.set:
-              id: btn_b_pressed
+              id: btn_a_pressed
               value: 'true'
           - globals.set:
               id: is_recording
@@ -280,30 +283,27 @@ binary_sensor:
               state: "LISTENING..."
           - script.execute: activity_watcher
           - lambda: |-
-              // Start audio streaming
               audio_streamer().start_recording();
               if (id(dev_mode)) {
                 id(event_seq)++;
-                ESP_LOGI("EVENT", "[%d] BUTTON_B_HOLD | mode=LISTENING | streaming=started", id(event_seq));
+                ESP_LOGI("EVENT", "[%d] BUTTON_A_HOLD | mode=LISTENING", id(event_seq));
               }
-          # Start microphone capture
           - microphone.capture: mic_i2s
     on_release:
       then:
         - if:
             condition:
-              lambda: 'return id(btn_b_pressed);'
+              lambda: 'return id(btn_a_pressed);'
             then:
-              # Stop microphone first
               - microphone.stop_capture: mic_i2s
               - lambda: |-
-                  // Stop audio streaming
                   id(is_recording) = false;
                   audio_streamer().stop_recording();
                   ESP_LOGI("AUDIO", "Sent %d bytes", audio_streamer().bytes_sent());
-              - rtttl.play: "Done:d=32,o=6,b=150:c"
+              # Satisfying "got it!" chirps
+              - rtttl.play: "Done:d=16,o=6,b=200:c,e,c"
               - globals.set:
-                  id: btn_b_pressed
+                  id: btn_a_pressed
                   value: 'false'
               - text_sensor.template.publish:
                   id: display_mode
@@ -314,8 +314,69 @@ binary_sensor:
               - lambda: |-
                   if (id(dev_mode)) {
                     id(event_seq)++;
-                    ESP_LOGI("EVENT", "[%d] BUTTON_B_RELEASE | mode=PROCESSING | bytes=%d", id(event_seq), audio_streamer().bytes_sent());
+                    ESP_LOGI("EVENT", "[%d] BUTTON_A_RELEASE | mode=PROCESSING | bytes=%d", id(event_seq), audio_streamer().bytes_sent());
                   }
+
+  # Button B - NO / BACK / CANCEL
+  - platform: gpio
+    pin:
+      number: GPIO39
+      inverted: true
+    name: "Button B"
+    id: button_b
+    on_click:
+      min_length: 50ms
+      max_length: 500ms
+      then:
+        - lambda: |-
+            std::string mode = id(display_mode).state;
+            if (id(dev_mode)) {
+              id(event_seq)++;
+              ESP_LOGI("EVENT", "[%d] BUTTON_B_TAP | mode=%s", id(event_seq), mode.c_str());
+            }
+        - script.execute: activity_watcher
+        - if:
+            condition:
+              lambda: 'return id(display_mode).state == "QUESTION";'
+            then:
+              # NO response - sad trombone wah wah!
+              - rtttl.play: "No:d=8,o=5,b=120:b,4a#,4a,2g#"
+              - text_sensor.template.publish:
+                  id: pager_display
+                  state: "NO"
+              - text_sensor.template.publish:
+                  id: display_mode
+                  state: "RESPONSE"
+        - if:
+            condition:
+              lambda: 'return id(display_mode).state == "CONFIRM";'
+            then:
+              # CANCEL - don't send
+              - rtttl.play: "Cancel:d=16,o=5,b=200:c,c"
+              - text_sensor.template.publish:
+                  id: pager_display
+                  state: "Cancelled"
+              - delay: 500ms
+              - text_sensor.template.publish:
+                  id: display_mode
+                  state: "IDLE"
+              - text_sensor.template.publish:
+                  id: pager_display
+                  state: "CLAWDBOT READY"
+        - if:
+            condition:
+              lambda: |-
+                std::string m = id(display_mode).state;
+                return m != "QUESTION" && m != "CONFIRM" && m != "IDLE";
+            then:
+              # BACK to home
+              - rtttl.play: "Back:d=32,o=5,b=150:c"
+              - text_sensor.template.publish:
+                  id: display_mode
+                  state: "IDLE"
+              - text_sensor.template.publish:
+                  id: pager_display
+                  state: "CLAWDBOT READY"
 
   # Power Button - Toggle brightness
   - platform: gpio
@@ -420,39 +481,111 @@ display:
       std::string mode = id(display_mode).state;
       std::string msg = id(pager_display).state;
 
-      // === LISTENING MODE - Cyan waveform ===
+      // === LISTENING MODE - Rainbow waveform (Pixar-style!) ===
       if (mode == "LISTENING") {
-          // Gradient header bar
-          it.filled_rectangle(0, 0, 240, 25, TEAL);
-          it.print(120, 5, id(font_body), Color::BLACK, TextAlign::TOP_CENTER, "LISTENING");
+          // Rainbow colors for bars
+          Color rainbow[] = {
+            Color(255, 50, 50),    // Red
+            Color(255, 150, 0),    // Orange
+            Color(255, 220, 0),    // Yellow
+            Color(100, 255, 50),   // Lime
+            Color(0, 220, 180),    // Teal
+            Color(50, 150, 255),   // Blue
+            Color(150, 100, 255),  // Purple
+            Color(255, 100, 200),  // Pink
+            Color(255, 150, 0),    // Orange
+            Color(255, 220, 0),    // Yellow
+            Color(100, 255, 50),   // Lime
+            Color(0, 220, 180)     // Teal
+          };
 
-          // Animated audio waveform - bouncing bars
+          // Bouncy rainbow waveform
           for (int i = 0; i < 12; i++) {
-            int phase = (frame + i * 2) % 20;
-            int h = 8 + abs(10 - phase) * 2;
-            Color bar_color = (i % 2 == 0) ? CYAN : TEAL;
-            it.filled_rectangle(30 + i * 16, 70 - h, 10, h * 2, bar_color);
+            int phase = (frame + i * 3) % 20;
+            int h = 10 + abs(10 - phase) * 3;
+            it.filled_rectangle(25 + i * 17, 68 - h, 12, h * 2, rainbow[i]);
           }
 
-          it.print(120, 115, id(font_small), DIM, TextAlign::CENTER, "Release when done");
+          // Cute bouncing mic icon (circle with lines)
+          int bounce = abs((frame % 10) - 5);
+          it.filled_circle(120, 115 + bounce, 8, Color::WHITE);
+          it.filled_rectangle(117, 123 + bounce, 6, 8, Color::WHITE);
+
           return;
       }
 
-      // === PROCESSING MODE - Amber spinner ===
-      if (mode == "PROCESSING") {
-          it.print(120, 35, id(font_body), AMBER, TextAlign::CENTER, "PROCESSING");
+      // === CONFIRM MODE - Show transcription, confirm before sending ===
+      if (mode == "CONFIRM") {
+          // Header with teal gradient effect
+          it.filled_rectangle(0, 0, 240, 22, TEAL);
+          it.print(120, 4, id(font_body), Color::BLACK, TextAlign::TOP_CENTER, "CONFIRM?");
 
-          // Spinning dots animation
-          for (int i = 0; i < 8; i++) {
-            float angle = (i * 45 + frame * 18) * 3.14159 / 180;
-            int x = 120 + cos(angle) * 25;
-            int y = 80 + sin(angle) * 25;
-            int size = (i == (frame % 8)) ? 6 : 3;
-            Color dot_color = (i == (frame % 8)) ? AMBER : ORANGE;
-            it.filled_circle(x, y, size, dot_color);
+          // Transcription text (the message contains what was heard)
+          std::string clean_msg = "";
+          for (char c : msg) {
+            if (c == '\n' || (c >= 32 && c <= 126)) clean_msg += c;
           }
 
-          it.print(120, 115, id(font_small), DIM, TextAlign::CENTER, "Thinking...");
+          // Word wrap the transcription
+          std::vector<std::string> lines;
+          std::string current_line = "";
+          for (size_t i = 0; i < clean_msg.length(); i++) {
+            current_line += clean_msg[i];
+            if (current_line.length() > 22 || clean_msg[i] == '\n') {
+              lines.push_back(current_line);
+              current_line = "";
+            }
+          }
+          if (!current_line.empty()) lines.push_back(current_line);
+
+          // Display transcription in white
+          int y = 30;
+          for (size_t i = 0; i < lines.size() && i < 4; i++) {
+            it.print(120, y, id(font_body), Color::WHITE, TextAlign::CENTER, lines[i].c_str());
+            y += 18;
+          }
+
+          // Button hints with pulsing animation
+          int pulse_frame = (millis() / 400) % 6;
+
+          // A = SEND (green, left side)
+          Color send_color = (pulse_frame < 3) ? LIME : Color(30, 150, 30);
+          it.filled_rectangle(15, 108, 100, 24, send_color);
+          it.print(65, 113, id(font_body), Color::BLACK, TextAlign::CENTER, "A = SEND");
+
+          // B = CANCEL (coral, right side)
+          Color cancel_color = (pulse_frame >= 3) ? CORAL : Color(180, 80, 50);
+          it.filled_rectangle(125, 108, 100, 24, cancel_color);
+          it.print(175, 113, id(font_body), Color::BLACK, TextAlign::CENTER, "B = CANCEL");
+
+          return;
+      }
+
+      // === PROCESSING MODE - Colorful bouncing dots ===
+      if (mode == "PROCESSING") {
+          // Rainbow bouncing dots instead of boring spinner
+          Color dot_colors[] = {
+            Color(255, 50, 50),    // Red
+            Color(255, 150, 0),    // Orange
+            Color(255, 220, 0),    // Yellow
+            Color(100, 255, 50),   // Lime
+            Color(0, 200, 220),    // Cyan
+            Color(100, 100, 255),  // Blue
+            Color(200, 100, 255),  // Purple
+            Color(255, 100, 200)   // Pink
+          };
+
+          // Bouncing dots in a wave
+          for (int i = 0; i < 8; i++) {
+            int bounce = abs(((frame * 2 + i * 5) % 30) - 15);
+            int x = 50 + i * 22;
+            int y = 55 + bounce;
+            int size = 6 + (bounce / 5);
+            it.filled_circle(x, y, size, dot_colors[i]);
+          }
+
+          it.print(120, 100, id(font_body), AMBER, TextAlign::CENTER, "PROCESSING");
+          it.print(120, 120, id(font_small), DIM, TextAlign::CENTER, "Thinking...");
           return;
       }
 
@@ -518,26 +651,82 @@ display:
           it.filled_rectangle(0, 0, 240, 25, question_color);
           it.print(120, 5, id(font_body), Color::BLACK, TextAlign::TOP_CENTER, "CLAUDE ASKS");
 
-          // Question text
+          // Question text with word wrapping
           std::string clean_msg = "";
           for (char c : msg) {
             if (c == '\n' || (c >= 32 && c <= 126)) clean_msg += c;
           }
 
+          // Word wrap at 24 chars (safe for 240px screen with 16px font)
           std::vector<std::string> lines;
-          size_t start = 0, end;
-          while ((end = clean_msg.find('\n', start)) != std::string::npos) {
-              lines.push_back(clean_msg.substr(start, end - start));
-              start = end + 1;
+          const int MAX_CHARS = 24;
+
+          // Split by newlines first, then wrap each paragraph
+          size_t para_start = 0, para_end;
+          while ((para_end = clean_msg.find('\n', para_start)) != std::string::npos) {
+              std::string para = clean_msg.substr(para_start, para_end - para_start);
+              if (!para.empty()) {
+                  // Wrap this paragraph
+                  std::string current_line = "";
+                  size_t word_start = 0;
+                  while (word_start < para.length()) {
+                      size_t word_end = para.find(' ', word_start);
+                      if (word_end == std::string::npos) word_end = para.length();
+                      std::string word = para.substr(word_start, word_end - word_start);
+
+                      if (current_line.empty()) {
+                          current_line = word;
+                      } else if (current_line.length() + 1 + word.length() <= MAX_CHARS) {
+                          current_line += " " + word;
+                      } else {
+                          lines.push_back(current_line);
+                          current_line = word;
+                      }
+                      word_start = (word_end == para.length()) ? word_end : word_end + 1;
+                  }
+                  if (!current_line.empty()) lines.push_back(current_line);
+              }
+              para_start = para_end + 1;
           }
-          lines.push_back(clean_msg.substr(start));
+          // Handle last paragraph
+          std::string para = clean_msg.substr(para_start);
+          if (!para.empty()) {
+              std::string current_line = "";
+              size_t word_start = 0;
+              while (word_start < para.length()) {
+                  size_t word_end = para.find(' ', word_start);
+                  if (word_end == std::string::npos) word_end = para.length();
+                  std::string word = para.substr(word_start, word_end - word_start);
+
+                  if (current_line.empty()) {
+                      current_line = word;
+                  } else if (current_line.length() + 1 + word.length() <= MAX_CHARS) {
+                      current_line += " " + word;
+                  } else {
+                      lines.push_back(current_line);
+                      current_line = word;
+                  }
+                  word_start = (word_end == para.length()) ? word_end : word_end + 1;
+              }
+              if (!current_line.empty()) lines.push_back(current_line);
+          }
+
+          // Auto-scroll if more than 3 lines (fits in y=35 to y=95)
+          const int MAX_VISIBLE_LINES = 3;
+          int scroll_offset = 0;
+          if (lines.size() > MAX_VISIBLE_LINES) {
+              // Scroll every 2.5 seconds
+              int scroll_index = (millis() / 2500) % lines.size();
+              scroll_offset = scroll_index;
+          }
 
           int y = 35;
-          for (const auto& line : lines) {
-              if (line.empty()) { y += 12; continue; }
-              it.print(120, y, id(font_body), Color::WHITE, TextAlign::CENTER, line.c_str());
+          int displayed = 0;
+          for (size_t i = scroll_offset; i < lines.size() && displayed < MAX_VISIBLE_LINES; i++) {
+              if (lines[i].empty()) { y += 12; continue; }
+              it.print(120, y, id(font_body), Color::WHITE, TextAlign::CENTER, lines[i].c_str());
               y += 20;
-              if (y > 100) break;
+              displayed++;
           }
 
           // Flashing button hint

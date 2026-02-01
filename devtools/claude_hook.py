@@ -7,12 +7,17 @@ to notify the pager when the agent is actively working.
 
 Usage:
     claude_hook.py <event_type> [tool_name] [extra_data]
+    claude_hook.py ask "Your question here?" [--timeout 30]
 
 Events:
     TOOL_START <tool>    - Agent started using a tool
     TOOL_END <tool>      - Agent finished using a tool
     WAITING              - Agent is waiting for user input
     QUESTION <question>  - Agent is asking user a yes/no question
+
+Special Commands:
+    ask <question>       - Send question to pager and WAIT for response
+                           Returns "yes" or "no" to stdout
 
 Environment:
     BRIDGE_URL - Bridge API URL (default: http://192.168.50.50:8081)
@@ -22,6 +27,7 @@ Environment:
 import sys
 import os
 import json
+import time
 import urllib.request
 import urllib.error
 
@@ -73,12 +79,84 @@ def send_to_dashboard(event_type: str, data: dict = None):
         return False
 
 
+def poll_for_response(timeout: int = 60) -> str:
+    """Poll the bridge for a response from the user."""
+    start_time = time.time()
+    poll_interval = 0.5  # Check every 500ms
+
+    while time.time() - start_time < timeout:
+        try:
+            req = urllib.request.Request(
+                f"{BRIDGE_URL}/response",
+                method="GET"
+            )
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                data = json.loads(resp.read().decode())
+                if data.get("status") == "ok" and "response" in data:
+                    return data["response"].get("response", "")
+        except (urllib.error.URLError, TimeoutError, ConnectionRefusedError, json.JSONDecodeError):
+            pass
+
+        time.sleep(poll_interval)
+
+    return ""  # Timeout with no response
+
+
+def ask_and_wait(question: str, timeout: int = 60) -> str:
+    """
+    Send a question to the pager and wait for the user's response.
+    Returns "yes", "no", or "" (timeout).
+    """
+    # Send the question to the bridge
+    success = send_to_bridge("QUESTION", None, question)
+    if not success:
+        sys.stderr.write("Failed to send question to pager\n")
+        return ""
+
+    send_to_dashboard("QUESTION", {"question": question, "waiting": True})
+
+    # Poll for response
+    response = poll_for_response(timeout)
+
+    send_to_dashboard("QUESTION_ANSWERED", {"question": question, "response": response})
+
+    return response
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: claude_hook.py <event_type> [tool_name] [extra_data]")
+        print("       claude_hook.py ask \"Your question?\" [--timeout 30]")
         sys.exit(1)
 
-    event_type = sys.argv[1].upper()
+    command = sys.argv[1].lower()
+
+    # Special "ask" command - send question and wait for response
+    if command == "ask":
+        if len(sys.argv) < 3:
+            print("Usage: claude_hook.py ask \"Your question?\" [--timeout 30]")
+            sys.exit(1)
+
+        question = sys.argv[2]
+        timeout = 60  # Default timeout
+
+        # Parse optional --timeout argument
+        if len(sys.argv) > 3 and sys.argv[3] == "--timeout":
+            try:
+                timeout = int(sys.argv[4])
+            except (IndexError, ValueError):
+                pass
+
+        response = ask_and_wait(question, timeout)
+        if response:
+            print(response)  # Output to stdout for Claude Code to read
+            sys.exit(0)
+        else:
+            sys.stderr.write("No response received (timeout)\n")
+            sys.exit(1)
+
+    # Regular event handling
+    event_type = command.upper()
     tool_name = sys.argv[2] if len(sys.argv) > 2 else None
     extra_data = sys.argv[3] if len(sys.argv) > 3 else None
 
