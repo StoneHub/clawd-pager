@@ -173,15 +173,36 @@ sensor:
       name: "Battery"
       id: battery_level
 
+  # MPU6886 IMU for shake detection
+  - platform: mpu6886
+    address: 0x68
+    accel_x:
+      id: accel_x
+      internal: true
+    accel_y:
+      id: accel_y
+      internal: true
+    accel_z:
+      id: accel_z
+      internal: true
+    update_interval: 100ms
+
 binary_sensor:
-  # Charging detection via template - polls AXP192 charging status
+  # Power plugged in - check AXP192 VBUS presence (register 0x00, bit 5)
   - platform: template
-    name: "Charging"
+    name: "Power Connected"
     id: is_charging
     lambda: |-
-      // Check if battery is charging by comparing voltage/current
-      // AXP192 reports charging when VBUS is present and battery < 100%
-      return id(battery_level).state < 99.0;
+      // Check VBUS present via AXP192 power status register
+      Wire.beginTransmission(0x34);
+      Wire.write(0x00);  // Power status register
+      Wire.endTransmission(false);
+      Wire.requestFrom(0x34, 1);
+      if (Wire.available()) {
+        uint8_t status = Wire.read();
+        return (status & 0x20) != 0;  // Bit 5 = VBUS present
+      }
+      return false;
     on_press:
       then:
         - lambda: |-
@@ -212,6 +233,25 @@ binary_sensor:
               - text_sensor.template.publish:
                   id: display_mode
                   state: "IDLE"
+
+  # Shake detection - wake on movement
+  - platform: template
+    name: "Shake Detected"
+    id: shake_detected
+    lambda: |-
+      // Calculate acceleration magnitude (ignoring gravity baseline of ~1g)
+      float x = id(accel_x).state;
+      float y = id(accel_y).state;
+      float z = id(accel_z).state;
+      float mag = sqrt(x*x + y*y + z*z);
+      // Trigger if acceleration exceeds 1.5g (shake threshold)
+      return mag > 1.5;
+    on_press:
+      then:
+        - lambda: |-
+            ESP_LOGI("SHAKE", "Shake detected! Waking up.");
+            id(my_axp).set_brightness(1.0);
+        - script.execute: activity_watcher
 
   # Button A - YES / CONFIRM / VOICE (hold)
   # New ergonomic layout: A is the main action button
@@ -458,17 +498,15 @@ script:
           id(my_axp).set_brightness(1.0);
       - delay: 30s
       - lambda: |-
-          // Don't dim if docked OR battery nearly full (plugged in and charged)
-          bool has_power = (id(display_mode).state == "DOCKED") ||
-                           (id(battery_level).has_state() && id(battery_level).state >= 95.0);
+          // Don't dim if charging or docked
+          bool has_power = (id(display_mode).state == "DOCKED") || id(is_charging).state;
           if (!has_power) {
             id(my_axp).set_brightness(0.4);
           }
       - delay: 30s
       - lambda: |-
-          // Don't dim if docked OR battery nearly full
-          bool has_power = (id(display_mode).state == "DOCKED") ||
-                           (id(battery_level).has_state() && id(battery_level).state >= 95.0);
+          // Don't dim if charging or docked
+          bool has_power = (id(display_mode).state == "DOCKED") || id(is_charging).state;
           if (!has_power) {
             id(my_axp).set_brightness(0.1);
           }
@@ -476,8 +514,7 @@ script:
       - lambda: |-
           // Auto power off after 3 minutes total inactivity
           // Skip if charging/docked
-          bool has_power = (id(display_mode).state == "DOCKED") ||
-                           (id(battery_level).has_state() && id(battery_level).state >= 95.0);
+          bool has_power = (id(display_mode).state == "DOCKED") || id(is_charging).state;
           if (!has_power) {
             ESP_LOGI("POWER", "Auto power off after 3 min inactivity");
             // Power off via AXP192 register 0x32, bit 7
@@ -640,6 +677,50 @@ display:
 
           it.print(120, 100, id(font_body), AMBER, TextAlign::CENTER, "PROCESSING");
           it.print(120, 120, id(font_small), DIM, TextAlign::CENTER, "Thinking...");
+          return;
+      }
+
+      // === CLAWDBOT MODE - Lobster agent activity ===
+      if (mode == "CLAWDBOT") {
+          // Lobster red/coral gradient background
+          for (int y = 0; y < 135; y++) {
+            int r = 40 - (y / 5);
+            int g = 10;
+            int b = 15;
+            it.horizontal_line(0, y, 240, Color(r > 0 ? r : 0, g, b));
+          }
+
+          // Animated lobster claw at top
+          int claw_anim = (frame % 20);
+          int claw_offset = claw_anim < 10 ? claw_anim : 20 - claw_anim;
+          it.print(100 - claw_offset, 15, id(font_body), CORAL, TextAlign::CENTER, "(");
+          it.print(140 + claw_offset, 15, id(font_body), CORAL, TextAlign::CENTER, ")");
+          it.filled_circle(120, 15, 6, CORAL);
+
+          // Status text from message
+          if (!msg.empty()) {
+            std::vector<std::string> lines;
+            std::string current;
+            for (char c : msg) {
+              if (c == '\n') {
+                lines.push_back(current);
+                current.clear();
+              } else {
+                current += c;
+              }
+            }
+            if (!current.empty()) lines.push_back(current);
+
+            int y_start = 50;
+            for (size_t i = 0; i < lines.size() && i < 4; i++) {
+              Color text_color = (i == 0) ? CORAL : Color(220, 220, 220);
+              it.print(120, y_start + i * 22, id(font_body), text_color, TextAlign::CENTER, lines[i].c_str());
+            }
+          } else {
+            it.print(120, 60, id(font_body), CORAL, TextAlign::CENTER, "CLAWDBOT");
+            it.print(120, 82, id(font_small), DIM, TextAlign::CENTER, "Active...");
+          }
+
           return;
       }
 
