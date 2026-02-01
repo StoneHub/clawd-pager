@@ -1170,7 +1170,7 @@ display:
           return;
       }
 
-      // === AGENT_PLAN MODE - Planning/todos ===
+      // === AGENT_PLAN MODE - Planning/todos with real items ===
       if (mode == "AGENT_PLAN") {
           int plan_frame = (millis() / 200) % 10;
 
@@ -1178,31 +1178,55 @@ display:
           it.filled_rectangle(0, 0, 240, 22, AMBER);
           it.print(120, 4, id(font_body), Color::BLACK, TextAlign::TOP_CENTER, "PLANNING");
 
-          // Checklist animation
-          it.filled_rectangle(25, 28, 190, 80, Color(25, 25, 18));
-          it.rectangle(25, 28, 190, 80, Color(100, 80, 30));
-
-          // Checkboxes appearing
-          int visible_boxes = (plan_frame % 4) + 1;
-          for (int i = 0; i < visible_boxes && i < 3; i++) {
-              int y = 35 + i * 24;
-              it.rectangle(40, y, 16, 16, AMBER);
-              if (i < visible_boxes - 1) {
-                  // Checked with thicker lines
-                  it.line(43, y + 8, 48, y + 13, LIME);
-                  it.line(44, y + 8, 49, y + 13, LIME);
-                  it.line(48, y + 13, 55, y + 3, LIME);
-                  it.line(49, y + 13, 56, y + 3, LIME);
+          // Parse message into lines: header, count, then todo items
+          std::vector<std::string> lines;
+          std::string current = "";
+          for (char c : msg) {
+              if (c == '\n') {
+                  if (!current.empty()) lines.push_back(current);
+                  current = "";
+              } else if (c >= 32 && c <= 126) {
+                  current += c;
               }
-              // Line placeholder - simulated text
-              int line_w = 100 + (i * 25) % 50;
-              it.filled_rectangle(65, y + 5, line_w, 8, Color(80, 70, 40));
+          }
+          if (!current.empty()) lines.push_back(current);
+
+          // Dark content area
+          it.filled_rectangle(5, 26, 230, 90, Color(20, 20, 15));
+          it.rectangle(5, 26, 230, 90, Color(100, 80, 30));
+
+          // Display todo items (skip first 2 lines which are header/count)
+          int y = 32;
+          for (size_t i = 2; i < lines.size() && i < 5; i++) {
+              std::string item = lines[i];
+              bool is_active = (item.length() > 0 && item[0] == '>');  // ► becomes >
+
+              // Checkbox
+              int box_x = 15;
+              if (is_active) {
+                  // Filled checkbox for active item
+                  it.filled_rectangle(box_x, y + 2, 14, 14, LIME);
+                  it.print(box_x + 4, y + 2, id(font_body), Color::BLACK, TextAlign::TOP_LEFT, ">");
+              } else {
+                  // Empty checkbox for pending
+                  it.rectangle(box_x, y + 2, 14, 14, AMBER);
+              }
+
+              // Item text (skip the marker character)
+              std::string text = item;
+              if (text.length() > 2) text = text.substr(2);  // Skip "► " or "○ "
+              if (text.length() > 24) text = text.substr(0, 24);
+
+              Color text_color = is_active ? LIME : Color(180, 160, 120);
+              it.print(35, y + 2, id(font_body), text_color, TextAlign::TOP_LEFT, text.c_str());
+
+              y += 22;
           }
 
-          // Planning text - USE BODY FONT
-          std::string plan_msg = msg;
-          if (plan_msg.length() > 26) plan_msg = plan_msg.substr(0, 26);
-          it.print(120, 115, id(font_body), AMBER, TextAlign::CENTER, plan_msg.c_str());
+          // Bottom status: "X more pending"
+          if (lines.size() > 1) {
+              it.print(120, 118, id(font_body), Color(120, 100, 60), TextAlign::CENTER, lines[1].c_str());
+          }
 
           return;
       }

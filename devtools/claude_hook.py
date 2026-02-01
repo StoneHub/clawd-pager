@@ -195,11 +195,26 @@ def extract_tool_details(tool_name: str, tool_input: dict) -> dict:
 
     elif tool_name == "TodoWrite":
         todos = tool_input.get("todos", [])
-        in_progress = sum(1 for t in todos if t.get("status") == "in_progress")
-        pending = sum(1 for t in todos if t.get("status") == "pending")
+        in_progress = [t for t in todos if t.get("status") == "in_progress"]
+        pending = [t for t in todos if t.get("status") == "pending"]
 
-        details["display_text"] = "PLANNING"
-        details["display_sub"] = f"{in_progress} active, {pending} pending"
+        # Get the active task name (truncated)
+        active_task = ""
+        if in_progress:
+            active_task = in_progress[0].get("content", "")[:30]
+
+        # Build display: show active task and count of pending
+        details["display_text"] = active_task if active_task else "PLANNING"
+        details["display_sub"] = f"{len(pending)} more pending"
+
+        # Send up to 3 todo items for display
+        todo_items = []
+        for t in in_progress[:1]:  # Current task first
+            todo_items.append(f"► {t.get('content', '')[:28]}")
+        for t in pending[:2]:  # Then up to 2 pending
+            todo_items.append(f"○ {t.get('content', '')[:28]}")
+
+        details["todo_items"] = todo_items
         details["display_mode"] = "PLANNING"
         details["color"] = "yellow"
 
