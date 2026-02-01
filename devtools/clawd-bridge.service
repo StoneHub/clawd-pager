@@ -9,6 +9,7 @@ User=monroe
 WorkingDirectory=/home/monroe/clawd/scripts
 Environment="PATH=/home/monroe/clawd/esphome-env/bin:/usr/local/bin:/usr/bin:/bin"
 Environment="PYTHONPATH=/home/monroe/clawd/work/clawd-pager"
+EnvironmentFile=/home/monroe/clawd/scripts/.env
 ExecStart=/home/monroe/clawd/esphome-env/bin/python bridge.py
 Restart=always
 RestartSec=10

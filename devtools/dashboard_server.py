@@ -112,6 +112,9 @@ class DashboardServer:
         self.app.router.add_post('/api/build/compile', self.handle_compile)
         self.app.router.add_post('/api/build/upload', self.handle_upload)
 
+        # Export endpoint (no session recording needed)
+        self.app.router.add_get('/api/export/logs', self.handle_export_logs)
+
         # WebSocket for live updates
         self.app.router.add_get('/ws', self.websocket_handler)
 
@@ -230,6 +233,56 @@ class DashboardServer:
                 "session_id": session_id
             })
         return web.json_response({"status": "no_session"})
+
+    async def handle_export_logs(self, request: web.Request) -> web.Response:
+        """Export recent logs as markdown (no session recording needed)."""
+        limit = int(request.query.get('limit', 200))
+        events = self.event_logger.get_recent_events(limit)
+
+        if not events:
+            return web.Response(text="# No Events\n\nNo events recorded yet.", content_type='text/markdown')
+
+        # Build markdown
+        first_ts = events[-1].timestamp if events else "unknown"
+        last_ts = events[0].timestamp if events else "unknown"
+
+        md = f"""# Clawd Pager Event Log
+
+**Exported**: {datetime.now().isoformat(timespec='seconds')}
+**Events**: {len(events)}
+**Time Range**: {first_ts} to {last_ts}
+
+## Event Timeline
+
+| Time | Type | Source | Details |
+|------|------|--------|---------|
+"""
+        for event in reversed(events):  # Oldest first
+            ts = event.timestamp
+            if "T" in ts:
+                ts = ts.split("T")[1][:12]  # Just time portion
+            data = event.data or {}
+
+            # Create summary based on event type
+            if event.event_type == "DISPLAY_UPDATE":
+                details = f"[{data.get('mode', '')}] {data.get('text', '')[:40]}"
+            elif event.event_type == "BUTTON_PRESS":
+                details = f"Button {data.get('button', '')} pressed"
+            elif event.event_type == "BUTTON_RELEASE":
+                details = f"Button {data.get('button', '')} ({data.get('duration_ms', 0):.0f}ms)"
+            elif event.event_type == "MODE_CHANGE":
+                details = f"{data.get('from_mode', '')} → {data.get('to_mode', '')}"
+            elif event.event_type == "BATTERY_UPDATE":
+                details = f"Battery: {data.get('level', '')}%"
+            elif event.event_type == "ERROR":
+                details = f"{data.get('error_type', '')}: {data.get('message', '')[:30]}"
+            else:
+                details = str(data)[:50] if data else ""
+
+            md += f"| {ts} | {event.event_type} | {event.source} | {details} |\n"
+
+        return web.Response(text=md, content_type='text/markdown',
+                           headers={'Content-Disposition': f'attachment; filename="pager_logs_{datetime.now().strftime("%Y%m%d_%H%M%S")}.md"'})
 
     async def handle_compile(self, request: web.Request) -> web.Response:
         """Compile ESPHome firmware."""

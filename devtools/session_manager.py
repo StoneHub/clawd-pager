@@ -226,7 +226,9 @@ class SessionManager:
 
         for path in sorted(self.storage_dir.glob("*.json.gz"), reverse=True):
             try:
-                session = self.load_session(path.stem)
+                # path.stem for "file.json.gz" is "file.json", need to strip .json too
+                session_id = path.stem.removesuffix('.json')
+                session = self.load_session(session_id)
                 sessions.append({
                     "session_id": session.session_id,
                     "start_time": session.start_time,

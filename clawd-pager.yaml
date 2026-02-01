@@ -1,6 +1,8 @@
 esphome:
   name: clawd-pager
   friendly_name: "Clawd Pager"
+  includes:
+    - audio_streamer.h
   on_boot:
     priority: -10
     then:
@@ -14,6 +16,9 @@ esphome:
       - text_sensor.template.publish:
           id: weather_display
           state: ""
+      - lambda: |-
+          // Initialize audio streamer with bridge IP and port
+          audio_streamer().begin("192.168.50.50", 12345);
 
 esp32:
   board: m5stick-c
@@ -28,6 +33,30 @@ external_components:
 i2c:
   sda: 21
   scl: 22
+
+# I2S Audio for PDM microphone (SPM1423)
+# M5StickC Plus 1.1: CLK=GPIO0, Data=GPIO34
+# NOTE: Buzzer must be OFF during recording - they share resources!
+i2s_audio:
+  - id: mic_i2s_bus
+    i2s_lrclk_pin:
+      number: GPIO0
+      ignore_strapping_warning: true
+
+microphone:
+  - platform: i2s_audio
+    id: mic_i2s
+    i2s_audio_id: mic_i2s_bus
+    i2s_din_pin: GPIO34
+    adc_type: external
+    pdm: true
+    channel: left
+    on_data:
+      - lambda: |-
+          // Stream audio via UDP to bridge when recording
+          if (id(is_recording) && x.size() > 0) {
+            audio_streamer().send_audio(x.data(), x.size());
+          }
 
 logger:
   level: DEBUG
@@ -149,6 +178,8 @@ binary_sensor:
               id(event_seq)++;
               ESP_LOGI("EVENT", "[%d] CHARGING_START", id(event_seq));
             }
+            // Full brightness when charging - we have power!
+            id(my_axp).set_brightness(1.0);
         - if:
             condition:
               lambda: 'return id(display_mode).state == "IDLE";'
@@ -232,8 +263,14 @@ binary_sensor:
           - ON for at least 400ms
         then:
           - rtttl.play: "Voice:d=32,o=6,b=150:g,c7"
+          - delay: 100ms
+          # CRITICAL: Stop buzzer before recording - they share resources!
+          - output.turn_off: buzzer_pwm
           - globals.set:
               id: btn_b_pressed
+              value: 'true'
+          - globals.set:
+              id: is_recording
               value: 'true'
           - text_sensor.template.publish:
               id: display_mode
@@ -243,16 +280,27 @@ binary_sensor:
               state: "LISTENING..."
           - script.execute: activity_watcher
           - lambda: |-
+              // Start audio streaming
+              audio_streamer().start_recording();
               if (id(dev_mode)) {
                 id(event_seq)++;
-                ESP_LOGI("EVENT", "[%d] BUTTON_B_HOLD | mode=LISTENING", id(event_seq));
+                ESP_LOGI("EVENT", "[%d] BUTTON_B_HOLD | mode=LISTENING | streaming=started", id(event_seq));
               }
+          # Start microphone capture
+          - microphone.capture: mic_i2s
     on_release:
       then:
         - if:
             condition:
               lambda: 'return id(btn_b_pressed);'
             then:
+              # Stop microphone first
+              - microphone.stop_capture: mic_i2s
+              - lambda: |-
+                  // Stop audio streaming
+                  id(is_recording) = false;
+                  audio_streamer().stop_recording();
+                  ESP_LOGI("AUDIO", "Sent %d bytes", audio_streamer().bytes_sent());
               - rtttl.play: "Done:d=32,o=6,b=150:c"
               - globals.set:
                   id: btn_b_pressed
@@ -266,7 +314,7 @@ binary_sensor:
               - lambda: |-
                   if (id(dev_mode)) {
                     id(event_seq)++;
-                    ESP_LOGI("EVENT", "[%d] BUTTON_B_RELEASE | mode=PROCESSING", id(event_seq));
+                    ESP_LOGI("EVENT", "[%d] BUTTON_B_RELEASE | mode=PROCESSING | bytes=%d", id(event_seq), audio_streamer().bytes_sent());
                   }
 
   # Power Button - Toggle brightness
@@ -316,6 +364,10 @@ globals:
   - id: event_seq
     type: int
     initial_value: '0'
+  # Audio recording state
+  - id: is_recording
+    type: bool
+    initial_value: 'false'
 
 script:
   - id: activity_watcher
@@ -325,10 +377,16 @@ script:
           id(my_axp).set_brightness(1.0);
       - delay: 30s
       - lambda: |-
-          id(my_axp).set_brightness(0.4);
+          // Don't dim if charging/docked - we have power!
+          if (id(display_mode).state != "DOCKED") {
+            id(my_axp).set_brightness(0.4);
+          }
       - delay: 30s
       - lambda: |-
-          id(my_axp).set_brightness(0.1);
+          // Don't dim if charging/docked
+          if (id(display_mode).state != "DOCKED") {
+            id(my_axp).set_brightness(0.1);
+          }
 
 spi:
   clk_pin: GPIO13
@@ -447,6 +505,48 @@ display:
             it.rectangle(105, 125, 30, 8, LIME);
             it.filled_rectangle(105, 125, fill, 8, LIME);
             it.printf(140, 125, id(font_small), LIME, "%.0f%%", batt);
+          }
+          return;
+      }
+
+      // === QUESTION MODE - Claude Code is asking something ===
+      if (mode == "QUESTION") {
+          int pulse_frame = (millis() / 300) % 10;
+
+          // Attention-getting header
+          Color question_color = id(pulse_state) ? AMBER : ORANGE;
+          it.filled_rectangle(0, 0, 240, 25, question_color);
+          it.print(120, 5, id(font_body), Color::BLACK, TextAlign::TOP_CENTER, "CLAUDE ASKS");
+
+          // Question text
+          std::string clean_msg = "";
+          for (char c : msg) {
+            if (c == '\n' || (c >= 32 && c <= 126)) clean_msg += c;
+          }
+
+          std::vector<std::string> lines;
+          size_t start = 0, end;
+          while ((end = clean_msg.find('\n', start)) != std::string::npos) {
+              lines.push_back(clean_msg.substr(start, end - start));
+              start = end + 1;
+          }
+          lines.push_back(clean_msg.substr(start));
+
+          int y = 35;
+          for (const auto& line : lines) {
+              if (line.empty()) { y += 12; continue; }
+              it.print(120, y, id(font_body), Color::WHITE, TextAlign::CENTER, line.c_str());
+              y += 20;
+              if (y > 100) break;
+          }
+
+          // Flashing button hint
+          if (pulse_frame < 5) {
+            it.filled_rectangle(60, 115, 120, 20, LIME);
+            it.print(120, 118, id(font_body), Color::BLACK, TextAlign::CENTER, "Press A = YES");
+          } else {
+            it.rectangle(60, 115, 120, 20, LIME);
+            it.print(120, 118, id(font_body), LIME, TextAlign::CENTER, "Press A = YES");
           }
           return;
       }

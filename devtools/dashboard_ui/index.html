@@ -355,6 +355,7 @@
                     <button onclick="sendIdleMode()">Set IDLE</button>
                     <button onclick="clearEvents()">Clear Events</button>
                     <button onclick="exportSession()">Export Session</button>
+                    <button onclick="exportAllLogs()" style="background: #4a5568;">Export All Logs</button>
                 </div>
 
                 <div class="panel-header" style="margin: 1rem -1rem 0.5rem; padding: 0.5rem 1rem;">Recent Sessions</div>
@@ -557,8 +558,24 @@
             }
         });
 
-        // Quick actions
+        // Quick actions - Call bridge API directly (same host, port 8081)
+        const BRIDGE_API = `http://${window.location.hostname}:8081`;
+
         async function sendTestAlert() {
+            try {
+                const resp = await fetch(`${BRIDGE_API}/device/alert`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: 'Test Alert!' })
+                });
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    alert(`Alert failed: ${err.message || err.error}`);
+                }
+            } catch (e) {
+                alert(`Bridge connection failed: ${e.message}`);
+            }
+            // Also log event
             await fetch('/api/log', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -571,6 +588,15 @@
         }
 
         async function sendIdleMode() {
+            try {
+                await fetch(`${BRIDGE_API}/device/display`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: 'CLAWDBOT READY', mode: 'IDLE' })
+                });
+            } catch (e) {
+                console.error('Bridge error:', e);
+            }
             await fetch('/api/log', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -602,6 +628,11 @@
             a.href = url;
             a.download = `${latest}.json`;
             a.click();
+        }
+
+        async function exportAllLogs() {
+            // Direct download from API - no session recording needed
+            window.open('/api/export/logs?limit=500', '_blank');
         }
 
         // Load sessions list

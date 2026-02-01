@@ -1,0 +1,23 @@
+{
+  "name": "clawd-pager",
+  "version": "1.0.0",
+  "description": "Control the M5StickC Plus Clawd Pager from Claude Code",
+  "author": "Monroe",
+  "commands": {
+    "pager": {
+      "description": "Send alerts, messages, and questions to your pager",
+      "arguments": [
+        {
+          "name": "action",
+          "description": "Action: alert, say, ask, status, idle",
+          "required": false
+        },
+        {
+          "name": "message",
+          "description": "Message to display",
+          "required": false
+        }
+      ]
+    }
+  }
+}
