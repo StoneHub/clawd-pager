@@ -238,6 +238,18 @@ binary_sensor:
                     state: "RESPONSE"
           - if:
               condition:
+                lambda: 'return id(display_mode).state == "PERMISSION";'
+              then:
+                # APPROVED - triumphant sound!
+                - rtttl.play: "Approved:d=16,o=5,b=180:c,e,g,c6,8g,8c6"
+                - text_sensor.template.publish:
+                    id: pager_display
+                    state: "APPROVED"
+                - text_sensor.template.publish:
+                    id: display_mode
+                    state: "PERM_APPROVED"
+          - if:
+              condition:
                 lambda: 'return id(display_mode).state == "CONFIRM";'
               then:
                 # SEND - whoosh sound!
@@ -347,6 +359,18 @@ binary_sensor:
               - text_sensor.template.publish:
                   id: display_mode
                   state: "RESPONSE"
+        - if:
+            condition:
+              lambda: 'return id(display_mode).state == "PERMISSION";'
+            then:
+              # DENIED - warning buzz
+              - rtttl.play: "Denied:d=8,o=4,b=100:c,p,c,p,c"
+              - text_sensor.template.publish:
+                  id: pager_display
+                  state: "DENIED"
+              - text_sensor.template.publish:
+                  id: display_mode
+                  state: "PERM_DENIED"
         - if:
             condition:
               lambda: 'return id(display_mode).state == "CONFIRM";'
