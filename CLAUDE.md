@@ -25,8 +25,8 @@ A physical pager device (M5StickC Plus) that shows real-time status of Claude Co
                                     │
                       ┌─────────────▼─────────────┐
                       │      bridge.py            │
-                      │   192.168.50.50:8081      │
-                      │   (Raspberry Pi)          │
+                      │   fcfdev:8081             │
+                      │   (192.168.50.50)         │
                       │                           │
                       │  - Receives hook events   │
                       │  - Manages pager state    │
@@ -55,8 +55,10 @@ A physical pager device (M5StickC Plus) that shows real-time status of Claude Co
 |----------|-------|
 | **Device** | M5StickC Plus 1.1 (ESP32-PICO-D4) |
 | **Pager IP** | 192.168.50.85 |
-| **Bridge IP** | 192.168.50.50 (Pi, port 8081) |
+| **Bridge Host** | fcfdev (192.168.50.50, port 8081) |
 | **ESPHome Version** | 2024.12.4 (**DO NOT UPGRADE**) |
+
+**Note:** fcfdev is the hostname of the Raspberry Pi at 192.168.50.50. User is typically SSH'd into fcfdev when working on this project.
 
 ## All File Locations
 
@@ -68,7 +70,7 @@ A physical pager device (M5StickC Plus) that shows real-time status of Claude Co
 | `devtools/claude_hook.py` | Hook that sends tool events to bridge |
 | `audio_streamer.h` | UDP audio streaming for voice input |
 
-### On the Pi (`/home/monroe/clawd/scripts/`)
+### On fcfdev (`/home/monroe/clawd/scripts/`)
 | File | Purpose |
 |------|---------|
 | `bridge.py` | **Main bridge** - connects hooks to pager, manages state |
@@ -196,7 +198,7 @@ journalctl -u clawd-bridge -f
 1. **ESPHome 2024.12.4** - Don't upgrade, breaks Home Assistant compatibility
 2. **WiFi power_save_mode: none** - Required to prevent disconnects
 3. **AXP192 for backlight** - Not GPIO controllable
-4. **Don't SSH into Pi from Claude Code** - User is often already on the Pi
+4. **Don't SSH into fcfdev** - User is typically already logged into fcfdev when working on this project
 
 ## Testing Checklist
 
