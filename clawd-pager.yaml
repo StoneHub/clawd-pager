@@ -657,6 +657,61 @@ display:
           return;
       }
 
+      // === PERMISSION MODE - Claude Code needs approval for a tool ===
+      if (mode == "PERMISSION") {
+          int perm_frame = (millis() / 200) % 20;
+
+          // Urgent pulsing red/orange header
+          Color header_color = (perm_frame < 10) ? RED : ORANGE;
+          it.filled_rectangle(0, 0, 240, 28, header_color);
+          it.print(120, 6, id(font_body), Color::WHITE, TextAlign::TOP_CENTER, "APPROVE?");
+
+          // Parse message: line1=header, line2=tool, line3=command
+          std::vector<std::string> lines;
+          std::string current = "";
+          for (char c : msg) {
+              if (c == '\n') {
+                  if (!current.empty()) lines.push_back(current);
+                  current = "";
+              } else if (c >= 32 && c <= 126) {
+                  current += c;
+              }
+          }
+          if (!current.empty()) lines.push_back(current);
+
+          // Display tool name
+          if (lines.size() > 1) {
+              std::string tool = lines[1];
+              if (tool.length() > 24) tool = tool.substr(0, 24);
+              it.print(120, 35, id(font_body), CYAN, TextAlign::CENTER, tool.c_str());
+          }
+
+          // Display command preview (scrolling if long)
+          if (lines.size() > 2) {
+              std::string cmd = lines[2];
+              if (cmd.length() > 26) {
+                  int scroll = (perm_frame / 2) % (cmd.length() - 24);
+                  cmd = cmd.substr(scroll, 26);
+              }
+              it.print(120, 58, id(font_small), DIM, TextAlign::CENTER, cmd.c_str());
+          }
+
+          // Big YES / NO buttons with pulsing highlight
+          int pulse = (perm_frame < 10) ? 0 : 5;
+
+          // A = YES (green, left)
+          Color yes_bg = (perm_frame < 10) ? LIME : Color(30, 180, 30);
+          it.filled_rectangle(15 - pulse, 85, 100 + pulse * 2, 40, yes_bg);
+          it.print(65, 97, id(font_body), Color::BLACK, TextAlign::CENTER, "A = YES");
+
+          // B = NO (red, right)
+          Color no_bg = (perm_frame >= 10) ? RED : Color(180, 30, 30);
+          it.filled_rectangle(125 - pulse, 85, 100 + pulse * 2, 40, no_bg);
+          it.print(175, 97, id(font_body), Color::WHITE, TextAlign::CENTER, "B = NO");
+
+          return;
+      }
+
       // === QUESTION MODE - Claude Code is asking something ===
       if (mode == "QUESTION") {
           int pulse_frame = (millis() / 300) % 10;
@@ -831,25 +886,44 @@ display:
           it.filled_rectangle(10, 10, 220, 18, Color(40, 30, 20));
           it.print(120, 12, id(font_small), ORANGE, TextAlign::TOP_CENTER, "TERMINAL");
 
-          // Prompt with blinking cursor
-          it.print(20, 35, id(font_body), LIME, TextAlign::TOP_LEFT, "$");
-
-          // Command text (from msg)
-          std::string cmd = msg;
-          if (cmd.length() > 28) cmd = cmd.substr(0, 28) + "...";
-          it.print(35, 35, id(font_body), Color::WHITE, TextAlign::TOP_LEFT, cmd.c_str());
-
-          // Blinking cursor
-          if (bash_frame < 15) {
-              int cursor_x = 35 + cmd.length() * 8;
-              if (cursor_x > 200) cursor_x = 200;
-              it.filled_rectangle(cursor_x, 35, 8, 16, ORANGE);
+          // Parse message: line1 is command name, line2 is full command
+          std::string line1 = msg;
+          std::string line2 = "";
+          size_t nl = msg.find('\n');
+          if (nl != std::string::npos) {
+              line1 = msg.substr(0, nl);
+              line2 = msg.substr(nl + 1);
           }
 
-          // Running indicator
+          // Command name (short) - truncate to fit after "$"
+          if (line1.length() > 24) line1 = line1.substr(0, 24);
+          it.print(20, 35, id(font_body), LIME, TextAlign::TOP_LEFT, "$");
+          it.print(35, 35, id(font_body), CYAN, TextAlign::TOP_LEFT, line1.c_str());
+
+          // Full command preview (scrolling if long)
+          if (!line2.empty()) {
+              // Scroll long commands
+              int scroll_offset = 0;
+              if (line2.length() > 26) {
+                  int total_scroll = line2.length() - 24;
+                  scroll_offset = (bash_frame / 3) % (total_scroll + 10);
+                  if (scroll_offset > total_scroll) scroll_offset = 0;
+              }
+              std::string visible = line2.substr(scroll_offset, 26);
+              it.print(20, 58, id(font_small), DIM, TextAlign::TOP_LEFT, visible.c_str());
+          }
+
+          // Running indicator with animated dots
           std::string dots = "";
           for (int i = 0; i < (bash_frame / 5) % 4; i++) dots += ".";
-          it.print(20, 65, id(font_small), DIM, TextAlign::TOP_LEFT, ("Running" + dots).c_str());
+          it.print(20, 80, id(font_small), Color(80, 80, 80), TextAlign::TOP_LEFT, ("Running" + dots).c_str());
+
+          // Blinking cursor at end of command name
+          if (bash_frame < 15) {
+              int cursor_x = 35 + line1.length() * 8;
+              if (cursor_x > 200) cursor_x = 200;
+              it.filled_rectangle(cursor_x, 35, 2, 14, ORANGE);
+          }
 
           return;
       }
