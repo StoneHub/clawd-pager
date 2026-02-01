@@ -1,236 +1,211 @@
 # Clawd Pager - AI Assistant Context
 
-This document provides essential context for AI assistants (including Clawdbot) working in this repository.
+This document provides essential context for AI assistants (including Clawdbot and Claude Code) working on this project.
+
+## What Is This?
+
+A physical pager device (M5StickC Plus) that shows real-time status of Claude Code sessions. It displays what tools are being used, asks for permission approvals via physical buttons, and provides voice interaction with Clawdbot.
+
+## System Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         CLAUDE CODE SESSION                          │
+│                      (running on user's machine)                     │
+└───────────────┬─────────────────────────────────────┬───────────────┘
+                │                                     │
+    ┌───────────▼───────────┐           ┌─────────────▼─────────────┐
+    │   claude_hook.py      │           │   safety-guard.py         │
+    │   (PostToolUse)       │           │   (PreToolUse)            │
+    │   Sends tool status   │           │   Permission requests     │
+    └───────────┬───────────┘           └─────────────┬─────────────┘
+                │ HTTP POST                           │ HTTP POST + Poll
+                │ /agent                              │ /permission
+                └───────────────────┬─────────────────┘
+                                    │
+                      ┌─────────────▼─────────────┐
+                      │      bridge.py            │
+                      │   192.168.50.50:8081      │
+                      │   (Raspberry Pi)          │
+                      │                           │
+                      │  - Receives hook events   │
+                      │  - Manages pager state    │
+                      │  - Haiku briefings        │
+                      │  - Voice transcription    │
+                      │  - Permission tracking    │
+                      └─────────────┬─────────────┘
+                                    │ aioesphomeapi
+                                    │ port 6053
+                      ┌─────────────▼─────────────┐
+                      │    M5StickC Plus          │
+                      │    192.168.50.85          │
+                      │    (ESPHome firmware)     │
+                      │                           │
+                      │  - 135x240 TFT display    │
+                      │  - Button A (top) = YES   │
+                      │  - Button B (front) = NO  │
+                      │  - Buzzer for alerts      │
+                      │  - PDM microphone         │
+                      └───────────────────────────┘
+```
 
 ## Quick Reference
 
 | Property | Value |
 |----------|-------|
 | **Device** | M5StickC Plus 1.1 (ESP32-PICO-D4) |
-| **IP Address** | 192.168.50.85 |
-| **API Port** | 6053 (ESPHome native API) |
-| **ESPHome Version** | 2024.12.4 (**DO NOT UPGRADE** - HA compatibility) |
-| **Bridge Host** | 192.168.50.50 (fcfdev/Raspberry Pi) |
-| **Dashboard** | http://192.168.50.50:8080 |
+| **Pager IP** | 192.168.50.85 |
+| **Bridge IP** | 192.168.50.50 (Pi, port 8081) |
+| **ESPHome Version** | 2024.12.4 (**DO NOT UPGRADE**) |
 
-## Critical Constraints
+## All File Locations
 
-1. **ESPHome Version Lock**: Must use 2024.12.4. Newer versions use incompatible `aioesphomeapi` versions that break Home Assistant 2025.1.4 integration.
-
-2. **WiFi Power Save**: Must be `none`. Any other setting causes random disconnects.
-
-3. **Backlight Control**: Uses AXP192 PMIC, NOT GPIO. Requires the `martydingo/esphome-axp192` external component.
-
-## Architecture
-
-```
-┌─────────────────────┐
-│  Telegram / User    │
-└─────────┬───────────┘
-          │
-┌─────────▼───────────┐
-│  Clawdbot Agent     │
-└─────────┬───────────┘
-          │
-┌─────────▼───────────┐     ┌─────────────────────┐
-│  bridge.py (Pi)     │────▶│  Dev Dashboard      │
-│  192.168.50.50      │     │  :8080              │
-└─────────┬───────────┘     └─────────────────────┘
-          │ aioesphomeapi
-          │ port 6053
-┌─────────▼───────────┐
-│  M5StickC Plus      │
-│  192.168.50.85      │
-│  (ESPHome firmware) │
-└─────────────────────┘
-```
-
-## Key Files
-
+### In This Repo (`/home/monroe/clawd/work/clawd-pager/`)
 | File | Purpose |
 |------|---------|
-| `clawd-pager.yaml` | **Main ESPHome config** - Edit this for device behavior |
-| `PROJECT_STATE.md` | Current status, troubleshooting history |
-| `MASTER_PLAN.md` | Development roadmap and milestones |
-| `/home/monroe/clawd/scripts/bridge.py` | Python bridge running on Pi |
-| `devtools/` | Development tooling (event logger, dashboard) |
+| `clawd-pager.yaml` | **Main ESPHome firmware** - display modes, buttons, sounds |
+| `CLAUDE.md` | This file - AI assistant context |
+| `devtools/claude_hook.py` | Hook that sends tool events to bridge |
+| `audio_streamer.h` | UDP audio streaming for voice input |
+
+### On the Pi (`/home/monroe/clawd/scripts/`)
+| File | Purpose |
+|------|---------|
+| `bridge.py` | **Main bridge** - connects hooks to pager, manages state |
+| `.env` | Environment variables (ANTHROPIC_API_KEY, etc.) |
+
+### Claude Code Hooks (`~/.claude/hooks/`)
+| File | Purpose |
+|------|---------|
+| `safety-guard.py` | PreToolUse hook - blocks dangerous commands, requests permission via pager |
+
+### Systemd Service
+```bash
+# Bridge runs as systemd service
+sudo systemctl status clawd-bridge
+sudo systemctl restart clawd-bridge
+journalctl -u clawd-bridge -f  # View logs
+```
+
+## Display Modes
+
+| Mode | Trigger | Description |
+|------|---------|-------------|
+| `IDLE` | Default | Static clock, battery, date. Tap A for briefing |
+| `AGENT` | Tool use | Generic "working" indicator |
+| `AGENT_EDIT` | Edit tool | Shows filename, +lines/-lines, code preview |
+| `AGENT_BASH` | Bash tool | Terminal style with command preview |
+| `AGENT_READ` | Read tool | Blue header, scrolling page animation |
+| `AGENT_SEARCH` | Grep/Glob | Purple, magnifying glass animation |
+| `AGENT_WEB` | WebFetch | Cyan globe animation |
+| `AGENT_PLAN` | TodoWrite | Amber, shows actual todo items |
+| `AGENT_SUB` | Task tool | Pink, shows sub-agent type |
+| `PERMISSION` | PreToolUse hook | Red/orange, A=YES B=NO buttons |
+| `BRIEFING` | Button A tap | Shows Haiku summary of session |
+| `LOADING` | Fetching data | Minimal dots animation |
+| `LISTENING` | Button A hold | Rainbow waveform, recording voice |
+| `PROCESSING` | After voice | Bouncing dots while thinking |
+| `DOCKED` | Charging | Ambient display with particles |
+
+## Button Behavior
+
+### Button A (Top, GPIO37)
+- **Short tap in IDLE**: Fetch Haiku briefing (shows recent activity summary)
+- **Short tap in BRIEFING**: Show more detail
+- **Short tap in PERMISSION**: Approve (YES)
+- **Long hold (400ms+)**: Voice recording
+
+### Button B (Front, GPIO39)
+- **Tap in BRIEFING**: Dismiss, return to IDLE
+- **Tap in PERMISSION**: Deny (NO)
+- **Tap elsewhere**: Back to IDLE
+
+### Power Button (Left side)
+- Handled by AXP192 hardware (not GPIO addressable)
+- Short press: Wake from off
+- Long press (6s): Power off
+
+## Power Management
+
+- **Activity timeout**: 30s → 40% brightness, 60s → 10%, 180s → auto power off
+- **Charging exception**: Won't dim or power off when battery ≥95% or in DOCKED mode
+- **Auto power off**: Uses I2C write to AXP192 register 0x32
+
+## Permission System Flow
+
+1. Claude Code tries to run a command matching `safety-guard.py` patterns
+2. Hook POSTs to bridge `/permission` endpoint
+3. Bridge shows PERMISSION mode on pager
+4. User presses A (approve) or B (deny)
+5. Firmware sets mode to `PERM_APPROVED` or `PERM_DENIED`
+6. Bridge detects mode change, updates permission status
+7. Hook polls `/permission/{id}` and gets result
+8. Hook returns `allow` or `deny` to Claude Code
+
+## Briefing Feature
+
+- Tap A on IDLE → shows "Fetching update..." loading screen
+- Calls `ask_claude()` via Clawdbot (uses Claude Code subscription)
+- Displays brief summary of recent session activity
+- Tap A again for more detail, B to dismiss
 
 ## Development Commands
 
 ```bash
-# From Windows (PowerShell)
-.\dev.ps1 compile      # Validate and compile firmware
-.\dev.ps1 upload       # OTA upload to device
-.\dev.ps1 watch        # Compile + Upload + Tail logs
-.\dev.ps1 logs         # Stream device logs
-.\dev.ps1 dashboard    # Open web dashboard
-
-# From Linux/WSL
+# Compile firmware
 source /home/monroe/clawd/esphome-env/bin/activate
 esphome compile clawd-pager.yaml
+
+# Upload to pager
 esphome upload clawd-pager.yaml --device 192.168.50.85
+
+# View pager logs
 esphome logs clawd-pager.yaml --device 192.168.50.85
+
+# Restart bridge (after editing bridge.py)
+sudo systemctl restart clawd-bridge
+
+# View bridge logs
+journalctl -u clawd-bridge -f
 ```
 
-## ESPHome API Services
+## Common Issues
 
-The device exposes these services via the ESPHome native API:
+### Pager shows wrong mode for tools
+- **Cause**: Bridge sending `SILENT` instead of actual mode
+- **Fix**: Check bridge.py `_handle_tool_event` - should send `SILENT_AGENT_READ` etc.
 
-| Service | Parameters | Description |
-|---------|------------|-------------|
-| `set_display` | `my_text: string`, `my_mode: string` | Update display content and mode |
-| `alert` | `my_text: string` | Show alert with distinct tone |
-| `update_weather` | `my_weather: string` | Update weather widget |
-| `set_dev_mode` | `enabled: bool` | Toggle verbose event logging |
-| `get_state` | (none) | Log current device state |
+### Permission prompt shows 1/2/3 in terminal
+- **Cause**: safety-guard.py not polling for pager response
+- **Fix**: Ensure `request_pager_permission()` is called, not just returning "ask"
 
-## Display Modes
+### Screen dims while charging
+- **Cause**: activity_watcher not checking battery level
+- **Fix**: Check `has_power` logic includes `battery_level >= 95.0`
 
-| Mode | Description |
-|------|-------------|
-| `IDLE` | Home screen with clock, weather, battery |
-| `LISTENING` | Voice capture active (Button B held) |
-| `PROCESSING` | Working on voice input |
-| `AWAITING` | Waiting for AI response |
-| `RESPONSE` | Displaying message |
-| `ALERT` | Priority notification with distinct tone |
+### Briefing shows "Error: 400"
+- **Cause**: Direct Anthropic API call with no credits
+- **Fix**: Use `ask_claude()` which routes through Clawdbot (Claude Code subscription)
 
-## Hardware Pinout
+### Power button doesn't work
+- **Cause**: GPIO35 is not connected to power button on M5StickC Plus
+- **Note**: Power button is handled by AXP192 at hardware level, not addressable via GPIO
 
-| Pin | Function |
-|-----|----------|
-| GPIO37 | Button A (inverted) |
-| GPIO39 | Button B (inverted) |
-| GPIO35 | Power Button (inverted) |
-| GPIO2 | Buzzer (LEDC PWM, RTTTL) |
-| GPIO13 | SPI CLK |
-| GPIO15 | SPI MOSI |
-| GPIO5 | Display CS |
-| GPIO23 | Display DC |
-| GPIO18 | Display Reset |
-| GPIO21 | I2C SDA |
-| GPIO22 | I2C SCL |
+## Critical Constraints
 
-## Event Schema
+1. **ESPHome 2024.12.4** - Don't upgrade, breaks Home Assistant compatibility
+2. **WiFi power_save_mode: none** - Required to prevent disconnects
+3. **AXP192 for backlight** - Not GPIO controllable
+4. **Don't SSH into Pi from Claude Code** - User is often already on the Pi
 
-Events are logged to `~/.clawd/pager_events.db` with this structure:
+## Testing Checklist
 
-```json
-{
-  "timestamp": "2026-01-31T14:30:52.123",
-  "session_id": "20260131_143000",
-  "source": "device|bridge|user|dashboard",
-  "event_type": "BUTTON_PRESS|MODE_CHANGE|DISPLAY_UPDATE|...",
-  "data": { ... },
-  "sequence": 42
-}
-```
-
-### Event Types
-
-| Type | Source | Data Fields |
-|------|--------|-------------|
-| `BUTTON_PRESS` | device | button, display_mode |
-| `BUTTON_RELEASE` | device | button, duration_ms |
-| `MODE_CHANGE` | device/bridge | from_mode, to_mode |
-| `DISPLAY_UPDATE` | bridge | text, mode |
-| `AUDIO_START` | device | sample_rate |
-| `AUDIO_END` | device | bytes_captured, duration_ms |
-| `STT_RESULT` | bridge | transcript, confidence |
-| `ERROR` | both | error_type, message, stack |
-| `BUILD_START` | user | yaml_file |
-| `BUILD_END` | user | success, duration_s, firmware_size |
-| `OTA_START` | user | target_ip |
-| `OTA_END` | user | success, duration_s |
-
-## Common Issues and Fixes
-
-### Black Screen
-- **Cause**: Wrong backlight control method
-- **Fix**: Use AXP192 component, not GPIO
-
-### WiFi Disconnects
-- **Cause**: Power save mode enabled
-- **Fix**: Set `power_save_mode: none` in WiFi config
-
-### "Marker byte invalid: 0" Errors
-- **Cause**: ESPHome/HA API version mismatch
-- **Fix**: Downgrade to ESPHome 2024.12.4
-
-### Build Fails with SIGKILL
-- **Cause**: Parallel compilation uses too much memory
-- **Fix**: Set `ESPHOME_COMPILE_PROCESSES=1`
-
-### Device Unreachable for OTA
-- **Cause**: Deep sleep or WiFi power save
-- **Fix**: Ensure deep sleep is disabled, power_save_mode: none
-
-## Version Compatibility
-
-| Home Assistant | ESPHome | aioesphomeapi |
-|----------------|---------|---------------|
-| 2025.1.4 | 2024.12.4 | 24.6.2 |
-| 2025.1.4 | 2025.12.7 | 43.2.1 (INCOMPATIBLE) |
-| 2025.1.4 | 2026.1.2 | 43.13.0 (INCOMPATIBLE) |
-
-## Development Workflow
-
-### Typical Iteration Cycle
-
-1. Edit `clawd-pager.yaml`
-2. Run `.\dev.ps1 compile` to validate
-3. Run `.\dev.ps1 upload` to OTA deploy
-4. Open dashboard to monitor events
-5. Interact with device
-6. Review events in dashboard
-
-### Recording a Debug Session
-
-1. Open dashboard: `.\dev.ps1 dashboard`
-2. Click "Start Recording" with notes
-3. Reproduce the issue
-4. Click "End Recording"
-5. Export session JSON for analysis
-
-### Querying Events
-
-```python
-from devtools import get_logger
-
-logger = get_logger()
-
-# Recent events
-events = logger.get_recent_events(50)
-
-# Events by type
-button_events = logger.get_recent_events(50, "BUTTON_PRESS")
-
-# Search in data
-results = logger.search_events("LISTENING")
-
-# Session summary
-sessions = logger.list_sessions()
-```
-
-## Testing a Change
-
-After making changes, verify:
-
-1. Device boots with startup tone
-2. Clock displays correctly
-3. Button A shows briefing
-4. Button B triggers LISTENING mode
-5. OTA updates still work
-6. Dashboard shows events
-
-## Files NOT to Modify
-
-- `secrets.yaml` - Contains WiFi credentials (gitignored)
-- `.esphome/` - Build artifacts (regenerated)
-- `~/.clawd/pager_events.db` - Persistent event storage
-
-## Contact
-
-- **User**: Monroe
-- **Telegram ID**: 8019338216
-- **Home Assistant**: http://192.168.50.50:8123
+After changes, verify:
+1. Device boots with Mario jingle
+2. IDLE shows static clock/battery (no animations)
+3. Button A tap shows briefing
+4. Button A hold records voice
+5. Button B dismisses screens
+6. Tool use shows correct mode (AGENT_EDIT, AGENT_BASH, etc.)
+7. Permission requests show on pager, buttons work
+8. Auto power off after 3 min idle (if not charging)
