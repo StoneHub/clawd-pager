@@ -64,7 +64,7 @@ def extract_tool_details(tool_name: str, tool_input: dict) -> dict:
     details = {
         "event_type": "TOOL_START",
         "tool": tool_name,
-        "display_mode": "WORKING",  # Default mode
+        "display_mode": "AGENT",  # Default — firmware's generic agent mode
     }
 
     if tool_name == "Edit":
@@ -108,7 +108,7 @@ def extract_tool_details(tool_name: str, tool_input: dict) -> dict:
                 preview = preview_lines[0][:40]
                 details["code_preview"] = preview
 
-        details["display_mode"] = "EDIT"
+        details["display_mode"] = "AGENT_EDIT"
 
     elif tool_name == "Write":
         file_path = tool_input.get("file_path", "")
@@ -119,7 +119,7 @@ def extract_tool_details(tool_name: str, tool_input: dict) -> dict:
 
         details["display_text"] = f"NEW: {filename}"
         details["display_sub"] = f"{lines} lines"
-        details["display_mode"] = "NEW_FILE"
+        details["display_mode"] = "AGENT_NEW"
         details["color"] = "cyan"
 
     elif tool_name == "Read":
@@ -127,7 +127,7 @@ def extract_tool_details(tool_name: str, tool_input: dict) -> dict:
         filename = get_filename(file_path)
 
         details["display_text"] = f"READ {filename}"
-        details["display_mode"] = "READ"
+        details["display_mode"] = "AGENT_READ"
         details["color"] = "blue"
 
     elif tool_name == "Bash":
@@ -141,7 +141,7 @@ def extract_tool_details(tool_name: str, tool_input: dict) -> dict:
 
         details["display_text"] = f"$ {cmd_name}"
         details["display_sub"] = short_cmd
-        details["display_mode"] = "BASH"
+        details["display_mode"] = "AGENT_BASH"
         details["color"] = "orange"
 
     elif tool_name == "Grep":
@@ -152,14 +152,14 @@ def extract_tool_details(tool_name: str, tool_input: dict) -> dict:
 
         details["display_text"] = f"GREP: {short_pattern}"
         details["display_sub"] = f"in {get_filename(path) or '.'}"
-        details["display_mode"] = "SEARCH"
+        details["display_mode"] = "AGENT_SEARCH"
         details["color"] = "purple"
 
     elif tool_name == "Glob":
         pattern = tool_input.get("pattern", "")
 
         details["display_text"] = f"FIND: {pattern[:35]}"
-        details["display_mode"] = "SEARCH"
+        details["display_mode"] = "AGENT_SEARCH"
         details["color"] = "purple"
 
     elif tool_name == "Task":
@@ -168,7 +168,7 @@ def extract_tool_details(tool_name: str, tool_input: dict) -> dict:
 
         details["display_text"] = f"AGENT: {agent_type}"
         details["display_sub"] = description[:40] if description else ""
-        details["display_mode"] = "AGENT"
+        details["display_mode"] = "AGENT_SUB"
         details["color"] = "magenta"
 
     elif tool_name == "WebSearch":
@@ -176,7 +176,7 @@ def extract_tool_details(tool_name: str, tool_input: dict) -> dict:
 
         details["display_text"] = "WEB SEARCH"
         details["display_sub"] = query[:40] + "..." if len(query) > 40 else query
-        details["display_mode"] = "WEB"
+        details["display_mode"] = "AGENT_WEB"
         details["color"] = "cyan"
 
     elif tool_name == "WebFetch":
@@ -190,7 +190,7 @@ def extract_tool_details(tool_name: str, tool_input: dict) -> dict:
 
         details["display_text"] = "FETCHING"
         details["display_sub"] = domain
-        details["display_mode"] = "WEB"
+        details["display_mode"] = "AGENT_WEB"
         details["color"] = "cyan"
 
     elif tool_name == "TodoWrite":
@@ -215,7 +215,7 @@ def extract_tool_details(tool_name: str, tool_input: dict) -> dict:
             todo_items.append(f"○ {t.get('content', '')[:28]}")
 
         details["todo_items"] = todo_items
-        details["display_mode"] = "PLANNING"
+        details["display_mode"] = "AGENT_PLAN"
         details["color"] = "yellow"
 
     elif tool_name == "AskUserQuestion":
@@ -232,7 +232,7 @@ def extract_tool_details(tool_name: str, tool_input: dict) -> dict:
     else:
         # Generic fallback
         details["display_text"] = tool_name
-        details["display_mode"] = "WORKING"
+        details["display_mode"] = "AGENT"
 
     return details
 

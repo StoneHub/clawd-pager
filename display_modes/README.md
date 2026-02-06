@@ -70,38 +70,25 @@ display:
 **Pros**: Full C++ control, testable
 **Cons**: Fonts as globals (not ideal, but pragmatic)
 
-## What's Been Done
+## Status
 
 - ✅ Base architecture (DisplayMode abstract class)
 - ✅ ListeningMode (rainbow waveform)
 - ✅ ProcessingMode (bouncing balls)
 - ✅ AgentMode (matrix code rain)
-- ⏳ DisplayModeManager routing logic (TODO: you implement)
-- ⏳ Remaining modes (CONFIRM, QUESTION, RESPONSE, ALERT, IDLE, AWAITING, DOCKED)
+- ✅ DisplayModeManager routing — returns `bool` (true = handled by C++, false = YAML should render)
+- ⏳ Remaining modes (CONFIRM, QUESTION, RESPONSE, ALERT, IDLE, AWAITING, DOCKED) — staying in YAML for now
 
-## Next Steps - YOU DECIDE
+## Decisions Made
 
-### Decision 1: Routing Logic
-In `display_mode_manager.h`, implement the `render()` method's mode routing.
+### Routing Logic
+Simple if/else chain with `bool` return. C++ handles animation-heavy modes; YAML handles text/font-dependent modes. This is the **hybrid approach**.
 
-Consider:
-- **Simple if/else chain**: Easy to understand, linear search
-- **Map-based dispatch**: O(1) lookup, more complex setup
-- **Fallback handling**: What happens if mode is unknown?
+### Font Strategy
+**Hybrid**: Animations stay in C++ (no fonts needed), text rendering stays in YAML (has font access). When/if we migrate text modes to C++, use a global font setter.
 
-### Decision 2: Font Strategy
-How should modes access fonts defined in YAML?
-
-- **Pass as parameters**: `render(it, millis, msg, font_body, font_large, ...)`
-- **Global setter**: `set_fonts()` called once at init
-- **Hybrid**: Keep text rendering in YAML, C++ only for animations
-
-### Decision 3: Migration Scope
-Should we migrate ALL 9 modes to C++, or just the animation-heavy ones?
-
-- **Full migration**: Consistent, fully testable, but more work
-- **Selective**: Migrate LISTENING, PROCESSING, AGENT (done), keep simple modes in YAML
-- **Incremental**: Migrate one per week as needed
+### Migration Scope
+**Selective/incremental**: Only animation-heavy modes (LISTENING, PROCESSING, AGENT) are in C++. Text-heavy modes with font dependencies (QUESTION, PERMISSION, AGENT_EDIT, etc.) stay in YAML until a font-passing mechanism is needed.
 
 ## Testing (Future)
 
@@ -128,4 +115,14 @@ This is impossible with YAML lambdas.
 
 ---
 
-**Your turn!** Open `display_mode_manager.h` and implement the routing logic in the `render()` method. Decide which approach fits your workflow best.
+## Wiring Into YAML
+
+To activate the C++ renderer, add this guard at the top of the display lambda in `clawd-pager.yaml`:
+
+```yaml
+# After: std::string mode = id(display_mode).state;
+# After: std::string msg = id(pager_display).state;
+if (DisplayModeManager::render(it, mode, msg)) return;
+```
+
+This lets C++ handle LISTENING/PROCESSING/AGENT (returning `true`), and falls through to the existing YAML mode handlers for everything else.
