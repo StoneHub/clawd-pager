@@ -22,9 +22,10 @@ import json
 import urllib.request
 import urllib.error
 
-# Bridge runs on the Raspberry Pi
-PI_HOST = "192.168.50.50"
-BRIDGE_URL = os.environ.get("BRIDGE_URL", f"http://{PI_HOST}:8081")
+# Bridge: local by default (runs in WSL alongside Claude Code)
+# Override with BRIDGE_URL env var for remote Pi setup
+BRIDGE_HOST = os.environ.get("BRIDGE_HOST", "127.0.0.1")
+BRIDGE_URL = os.environ.get("BRIDGE_URL", f"http://{BRIDGE_HOST}:8081")
 
 
 def send_to_bridge(event_data: dict):

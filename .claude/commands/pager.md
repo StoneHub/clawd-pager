@@ -14,7 +14,7 @@ arguments:
 Control and interact with the M5StickC Plus pager from Claude Code.
 
 ## Configuration
-- **Bridge API**: http://192.168.50.50:8081
+- **Bridge API**: http://127.0.0.1:8081
 - **Dashboard**: http://192.168.50.50:8080
 - **Device IP**: 192.168.50.85
 
@@ -37,22 +37,22 @@ Use `curl` to call the bridge API:
 
 ```bash
 # Alert with tone
-curl -X POST http://192.168.50.50:8081/device/alert \
+curl -X POST http://127.0.0.1:8081/device/alert \
   -H "Content-Type: application/json" \
   -d '{"text": "MESSAGE HERE"}'
 
 # Display message (no tone)
-curl -X POST http://192.168.50.50:8081/device/display \
+curl -X POST http://127.0.0.1:8081/device/display \
   -H "Content-Type: application/json" \
   -d '{"text": "MESSAGE", "mode": "RESPONSE"}'
 
 # Ask question (shows flashing "Press A = YES")
-curl -X POST http://192.168.50.50:8081/device/display \
+curl -X POST http://127.0.0.1:8081/device/display \
   -H "Content-Type: application/json" \
   -d '{"text": "Your question here?\n\n[A] = Yes", "mode": "QUESTION"}'
 
 # Return to idle
-curl -X POST http://192.168.50.50:8081/device/display \
+curl -X POST http://127.0.0.1:8081/device/display \
   -H "Content-Type: application/json" \
   -d '{"text": "CLAWDBOT READY", "mode": "IDLE"}'
 ```

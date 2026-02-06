@@ -1,0 +1,53 @@
+{
+  "_comment": "Copy the 'hooks' section into your .claude/settings.local.json to enable pager integration. Adjust paths to match your repo location.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /path/to/clawd-pager/devtools/claude_hook.py PostToolUse",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /path/to/clawd-pager/devtools/claude_hook.py PreToolUse",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /path/to/clawd-pager/devtools/permission_handler.py",
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /path/to/clawd-pager/devtools/claude_hook.py WAITING",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

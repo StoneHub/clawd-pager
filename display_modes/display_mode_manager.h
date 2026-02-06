@@ -27,19 +27,19 @@ public:
 
         uint32_t millis = esphome::millis();
 
-        // Route animation-heavy modes to C++ classes.
-        // Returns true if handled, false if YAML should render instead.
+        // Route modes to C++ classes where feature-complete.
+        // PROCESSING and AGENT still need font support for text labels,
+        // so they stay in YAML for now.
         if (mode == "LISTENING") {
             listening_mode.render(it, millis, message);
-        } else if (mode == "PROCESSING") {
-            processing_mode.render(it, millis, message);
-        } else if (mode == "AGENT") {
-            agent_mode.render(it, millis, message);
-        } else {
-            // Not handled — caller (YAML lambda) should render this mode
-            return false;
+            return true;
         }
-        return true;
+
+        // Future: uncomment when font passing is implemented
+        // if (mode == "PROCESSING") { processing_mode.render(...); return true; }
+        // if (mode == "AGENT") { agent_mode.render(...); return true; }
+
+        return false;
     }
 };
 
