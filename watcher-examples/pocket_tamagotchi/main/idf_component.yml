@@ -1,0 +1,5 @@
+dependencies:
+  idf:
+    version: ">=5.0"
+  sensecap-watcher:
+    override_path: "../../../watcher-firmware/components/sensecap-watcher"
