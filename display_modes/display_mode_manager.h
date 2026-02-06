@@ -3,50 +3,43 @@
 #include "listening_mode.h"
 #include "processing_mode.h"
 #include "agent_mode.h"
-// TODO: Include other modes (CONFIRM, AWAITING, DOCKED, QUESTION, RESPONSE, ALERT, IDLE)
 
-// DisplayModeManager - Routes rendering to the appropriate mode class
+// DisplayModeManager - Routes rendering to the appropriate C++ mode class.
+// Handles animation-heavy modes in C++; returns false for modes that
+// should be rendered by YAML lambdas (text-heavy, font-dependent).
+//
 // Usage in YAML display lambda:
-//   DisplayModeManager::render(it, id(display_mode).state, id(pager_display).state);
+//   if (!DisplayModeManager::render(it, id(display_mode).state, id(pager_display).state)) {
+//       // ... existing YAML rendering for this mode ...
+//   }
 
 class DisplayModeManager {
 private:
-    // Singleton instances of each mode (stateless, reusable)
     static ListeningMode listening_mode;
     static ProcessingMode processing_mode;
     static AgentMode agent_mode;
-    // TODO: Add other mode instances
 
 public:
-    // Main render dispatcher
-    // @param it: ESPHome display buffer
-    // @param mode: Current mode string (from display_mode text sensor)
-    // @param message: Display text (from pager_display text sensor)
-    static void render(esphome::display::DisplayBuffer& it,
+    // Returns true if mode was rendered by C++, false if YAML should handle it.
+    static bool render(esphome::display::DisplayBuffer& it,
                       const std::string& mode,
                       const std::string& message) {
 
         uint32_t millis = esphome::millis();
 
-        // TODO: YOU IMPLEMENT THIS ROUTING LOGIC
-        //
-        // Route to the correct mode based on the mode string.
-        // Consider:
-        // - How to handle unknown modes (default/fallback?)
-        // - Whether to use if/else chain or switch/map
-        // - How to handle the hybrid approach (some modes in C++, some in YAML)
-        //
-        // Example pattern:
-        // if (mode == "LISTENING") {
-        //     listening_mode.render(it, millis, message);
-        // } else if (mode == "PROCESSING") {
-        //     processing_mode.render(it, millis, message);
-        // } ...
-        //
-        // Or you could keep some modes in YAML and only migrate the animation-heavy ones
-
-        // For now, default to black screen
-        it.fill(esphome::Color::BLACK);
+        // Route animation-heavy modes to C++ classes.
+        // Returns true if handled, false if YAML should render instead.
+        if (mode == "LISTENING") {
+            listening_mode.render(it, millis, message);
+        } else if (mode == "PROCESSING") {
+            processing_mode.render(it, millis, message);
+        } else if (mode == "AGENT") {
+            agent_mode.render(it, millis, message);
+        } else {
+            // Not handled — caller (YAML lambda) should render this mode
+            return false;
+        }
+        return true;
     }
 };
 
