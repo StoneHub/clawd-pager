@@ -4,7 +4,93 @@ This document provides essential context for AI assistants (including Clawdbot a
 
 ## What Is This?
 
-A physical pager device (M5StickC Plus) that shows real-time status of Claude Code sessions. It displays what tools are being used, asks for permission approvals via physical buttons, and provides voice interaction with Clawdbot.
+A multi-device hardware project for physical AI interaction. Two devices:
+
+1. **M5StickC Plus** (original) — ESPHome pager showing Claude Code session status
+2. **SenseCap Watcher W1-A** (active development) — ESP-IDF firmware with AI camera, 412x412 display, knob input
+
+---
+
+## SenseCap Watcher W1-A (Active)
+
+### Hardware
+- **SoC**: ESP32-S3 (QFN56, rev v0.2) with 8MB PSRAM
+- **AI**: Himax WiseEye2 co-processor (YOLO object detection)
+- **Display**: 412x412 round LCD (SPD2010) with touch
+- **Input**: Rotary encoder knob (GPIO41/42) + push button (IO expander pin 3)
+- **RGB LED**: WS2812 on GPIO40
+- **Audio**: ES8311 codec, I2S mic/speaker
+- **USB**: Two ports — ACM0 = Himax, ACM1 = ESP32-S3
+
+### ESP-IDF Build
+```bash
+source ~/esp/esp-idf/export.sh   # ESP-IDF v5.2.1
+cd watcher-firmware/examples/<example>
+idf.py set-target esp32s3
+idf.py build
+idf.py -p /dev/ttyACM1 flash     # ESP32 is ACM1
+```
+
+### USB Passthrough (WSL2)
+From **elevated PowerShell**: `usbipd attach --wsl --busid 2-1`
+
+### BSP Key APIs (`sensecap-watcher.h`)
+```c
+bsp_io_expander_init();                     // Always first
+bsp_exp_io_set_level(BSP_PWR_AI_CHIP, 1);  // Power on AI
+bsp_rgb_init(); bsp_rgb_set(r, g, b);      // RGB LED
+lv_disp_t *disp = bsp_lvgl_init();         // Display + touch + knob encoder
+sscma_client_handle_t c = bsp_sscma_client_init(); // AI camera
+bsp_exp_io_get_level(BSP_KNOB_BTN);        // Read knob button (0=pressed)
+bsp_system_shutdown();                       // Cuts battery power (no-op on USB!)
+bsp_system_deep_sleep(seconds);             // Real power off (works on USB too)
+```
+
+### Power Off Gotchas
+- `bsp_system_shutdown()` only works on battery — USB bypasses the power rail
+- Use `bsp_system_deep_sleep(0)` for USB-compatible power off
+- Physical pinhole reset button on bottom of device
+- Knob long-press to power on (3s hold, shows Seeed logo)
+- `bsp_set_btn_long_press_cb()` must be called AFTER `bsp_lvgl_init()` (needs encoder)
+
+### SSCMA AI Camera Pattern
+```c
+sscma_client_register_callback(client, &cb, NULL);  // cb.on_event for detections
+sscma_client_init(client);
+sscma_client_set_model(client, 1);                   // Model 1 = YOLO
+sscma_client_set_sensor(client, 1, 0, true);         // Sensor 1, opt 0 = 240x240
+sscma_client_invoke(client, -1, false, false);        // Continuous, no image
+// In on_event callback:
+sscma_utils_fetch_boxes_from_reply(reply, &boxes, &count);  // Get detections
+```
+
+### Component Dependencies
+Each example needs `main/idf_component.yml`:
+```yaml
+dependencies:
+  idf:
+    version: ">=5.0"
+  sensecap-watcher:
+    override_path: "../../../components/sensecap-watcher"
+```
+
+### Current Examples
+| Example | Description |
+|---------|-------------|
+| `pocket_tamagotchi` | AI-aware virtual pet — camera detects presence, touch to pet, knob to feed, RGB mood LED, NVS persistence |
+| `get_started` | Touch screen drawing demo |
+| `knob_rgb` | RGB LED + knob rotation |
+| `sscma_client_monitor` | Camera AI with LVGL image display |
+
+### LVGL Notes (v8.x in this SDK)
+- Only `lv_font_montserrat_14` available by default (enable others in sdkconfig)
+- Wrap all LVGL calls in `lvgl_port_lock(0)` / `lvgl_port_unlock()`
+- `lv_anim_exec_xcb_t` expects `void (*)(void*, int32_t)` — don't cast `lv_obj_set_y` directly, use a wrapper
+- Display is 412x412, use `DRV_LCD_H_RES` / `DRV_LCD_V_RES` constants
+
+---
+
+## M5StickC Plus (Original Pager)
 
 ## System Architecture
 
