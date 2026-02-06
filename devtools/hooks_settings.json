@@ -48,6 +48,18 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/path/to/clawd-pager/devtools/session_start_hook.sh",
+            "timeout": 15
+          }
+        ]
+      }
     ]
   }
 }

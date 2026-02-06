@@ -51,6 +51,7 @@
 | Example hooks config | DONE | `devtools/hooks_settings.json` |
 | DisplayModeManager C++ routing | DONE | `display_modes/display_mode_manager.h` |
 | LISTENING mode wired to C++ | DONE | `m5stickc/clawd-pager.yaml` |
+| SessionStart hook (auto-bridge) | DONE | `devtools/session_start_hook.sh` |
 
 ---
 
@@ -224,7 +225,8 @@ If Claude Code runs multiple sessions (different terminals), the bridge should t
 | `devtools/local_bridge.py` | Self-contained bridge for WSL | NEW — needs testing |
 | `devtools/claude_hook.py` | PostToolUse hook, sends to bridge | UPDATED — localhost default |
 | `devtools/permission_handler.py` | PermissionRequest hook | UPDATED — localhost default |
-| `devtools/hooks_settings.json` | Example hooks config for Claude Code | NEW |
+| `devtools/hooks_settings.json` | Example hooks config for Claude Code | UPDATED — includes SessionStart |
+| `devtools/session_start_hook.sh` | SessionStart hook — auto-starts bridge, reports status | NEW |
 | `.claude/commands/pager.md` | /pager slash command | UPDATED — localhost URLs |
 | `m5stickc/clawd-pager.yaml` | Pager firmware | UPDATED — C++ display manager |
 | `display_modes/display_mode_manager.h` | C++ display routing | UPDATED — routing implemented |
@@ -241,7 +243,7 @@ If Claude Code runs multiple sessions (different terminals), the bridge should t
 
 4. **Question routing** — Only YES/NO permission responses work. Free-form question responses (voice transcription back to Claude) need the Notification hook + response injection mechanism.
 
-5. **Bridge startup order** — Bridge must start before Claude Code session. Consider a systemd user service or a wrapper script that starts bridge in background before launching Claude.
+5. **Bridge startup order** — ~~Bridge must start before Claude Code session.~~ **RESOLVED**: `session_start_hook.sh` auto-starts bridge on SessionStart. Still worth testing the detached process lifecycle across multiple sessions.
 
 ---
 
@@ -258,6 +260,9 @@ If Claude Code runs multiple sessions (different terminals), the bridge should t
 - [ ] Button A hold → voice recording → bridge receives audio
 - [ ] Pager reboot → bridge reconnects automatically
 - [ ] Bridge restart → hooks gracefully timeout, no Claude Code hang
+- [ ] SessionStart hook → auto-starts bridge if not running
+- [ ] SessionStart hook → reports pager status with emoji indicators
+- [ ] SessionStart hook → detached bridge survives session end
 
 ---
 
