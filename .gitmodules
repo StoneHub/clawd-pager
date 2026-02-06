@@ -1,0 +1,3 @@
+[submodule "watcher-firmware"]
+	path = watcher-firmware
+	url = https://github.com/Seeed-Studio/SenseCAP-Watcher-Firmware.git
