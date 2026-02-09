@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Primary colors -->
+    <color name="primary">#00BCD4</color>
+    <color name="primary_dark">#0097A7</color>
+    <color name="secondary">#03DAC6</color>
+    
+    <!-- Background -->
+    <color name="background">#000000</color>
+    <color name="surface">#121212</color>
+    
+    <!-- Text -->
+    <color name="on_primary">#000000</color>
+    <color name="on_background">#FFFFFF</color>
+    <color name="on_surface">#E1E1E1</color>
+    
+    <!-- Status colors -->
+    <color name="status_connected">#4CAF50</color>
+    <color name="status_connecting">#FFC107</color>
+    <color name="status_disconnected">#9E9E9E</color>
+    <color name="status_error">#F44336</color>
+    
+    <!-- Priority colors -->
+    <color name="priority_info">#2196F3</color>
+    <color name="priority_warning">#FF9800</color>
+    <color name="priority_critical">#F44336</color>
+</resources>

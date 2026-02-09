@@ -1,0 +1,9 @@
+# Local configuration for Clawdbot Pager
+# Copy this file to local.properties and fill in your values
+
+# Android SDK location (auto-detected by Android Studio)
+# sdk.dir=/path/to/android/sdk
+
+# Clawdbot Gateway Configuration
+GATEWAY_URL=ws://192.168.50.50:18789/watch
+AUTH_TOKEN=your-gateway-token-here
