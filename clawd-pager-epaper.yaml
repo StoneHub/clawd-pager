@@ -18,10 +18,10 @@ esp32:
     type: arduino
     version: recommended
 
-# I2C Bus for RTC, PMIC, Audio Codec
+# I2C Bus for RTC (PCF85063), PMIC (ETA6098), Audio Codec (ES8311)
 i2c:
-  sda: GPIO20  # SDA on GP20
-  scl: GPIO19  # SCL on GP19
+  sda: GPIO8   # Common ESP32-S3 I2C SDA
+  scl: GPIO9   # Common ESP32-S3 I2C SCL
   scan: true
   frequency: 400kHz
 
@@ -33,24 +33,25 @@ time:
 
 # ePaper Display (200x200 pixels)
 # High contrast, perfect for dense information layouts
+# Standard Waveshare ESP32-S3 ePaper pinout
 spi:
-  clk_pin: GPIO18
-  mosi_pin: GPIO23
+  clk_pin: GPIO13   # SCLK
+  mosi_pin: GPIO14  # DIN/MOSI
+  id: epaper_spi
 
 display:
   - platform: waveshare_epaper
-    # Common Waveshare 1.54" 200x200 models:
-    # - "1.54in" = SSD1681 (black/white only)
-    # - "1.54in-m5stickc-b" = IL0373 (black/white/red)
-    # Check your board's controller chip marking
-    model: 1.54in  # Start with basic b/w model
-    cs_pin: GPIO10
-    dc_pin: GPIO11
-    reset_pin: GPIO12
-    busy_pin: GPIO13
+    # Waveshare ESP32-S3 1.54inch e-Paper (200×200, Black/White)
+    # Controller: SSD1681 (most likely for b/w version)
+    model: 1.54in
+    spi_id: epaper_spi
+    cs_pin: GPIO15    # Chip Select
+    dc_pin: GPIO27    # Data/Command
+    reset_pin: GPIO26 # Reset
+    busy_pin: GPIO25  # Busy status
     rotation: 0
-    update_interval: 30s  # ePaper refresh is slow, don't spam
-    full_update_every: 30  # Full refresh every 30 updates to prevent ghosting
+    update_interval: 30s
+    full_update_every: 30  # Prevent ghosting
     lambda: |-
       // High-density dashboard layout for 200x200 ePaper
       auto mode = id(display_mode).state;
