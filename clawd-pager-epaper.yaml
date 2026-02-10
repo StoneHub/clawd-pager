@@ -1,0 +1,184 @@
+esphome:
+  name: clawd-pager-epaper
+  friendly_name: "Clawd Pager (ePaper)"
+  on_boot:
+    priority: -10
+    then:
+      - logger.log: "🦞 Clawd Pager ePaper booting..."
+      - text_sensor.template.publish:
+          id: pager_display
+          state: "READY"
+      - text_sensor.template.publish:
+          id: display_mode
+          state: "DASHBOARD"
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: arduino
+    version: recommended
+
+# I2C Bus for RTC, PMIC, Audio Codec
+i2c:
+  sda: GPIO20  # SDA on GP20
+  scl: GPIO19  # SCL on GP19
+  scan: true
+  frequency: 400kHz
+
+# Real-Time Clock (PCF85063)
+time:
+  - platform: pcf85063
+    id: rtc_time
+    update_interval: 60s
+
+# ePaper Display (200x200 pixels)
+# High contrast, perfect for dense information layouts
+spi:
+  clk_pin: GPIO18
+  mosi_pin: GPIO23
+
+display:
+  - platform: waveshare_epaper
+    model: 1.54in-m5stickc-b  # Adjust based on actual controller
+    cs_pin: GPIO10
+    dc_pin: GPIO11
+    reset_pin: GPIO12
+    busy_pin: GPIO13
+    rotation: 0
+    update_interval: 30s  # ePaper refresh is slow, don't spam
+    lambda: |-
+      // High-density dashboard layout for 200x200 ePaper
+      auto mode = id(display_mode).state;
+      auto message = id(pager_display).state;
+      
+      // Clear screen
+      it.fill(COLOR_OFF);
+      
+      // Header: Time + Status (top 30px)
+      it.rectangle(0, 0, 200, 30);
+      auto time = id(rtc_time).now();
+      it.strftime(5, 8, id(font_medium), TextAlign::TOP_LEFT, "%H:%M", time);
+      it.printf(195, 8, id(font_small), TextAlign::TOP_RIGHT, "%.0f%%", id(battery_percent).state);
+      
+      if (mode == "DASHBOARD") {
+        // ===== DASHBOARD MODE: Max info density =====
+        // Section 1: Agent Status (30-80px)
+        it.line(0, 30, 200, 30);
+        it.printf(5, 35, id(font_small), "AGENT:");
+        it.printf(5, 50, id(font_medium), "%s", message.c_str());
+        
+        // Section 2: Tasks/Notifications (80-140px)
+        it.line(0, 80, 200, 80);
+        it.printf(5, 85, id(font_small), "TASKS:");
+        // TODO: Show task queue here
+        it.printf(5, 100, id(font_small), "• Awaiting input...");
+        
+        // Section 3: Quick Stats (140-200px)
+        it.line(0, 140, 200, 140);
+        it.printf(5, 145, id(font_small), "WIFI: %s", id(wifi_ssid).state.c_str());
+        it.printf(5, 160, id(font_small), "IP: %s", id(wifi_ip).state.c_str());
+        
+      } else if (mode == "QUESTION") {
+        // ===== QUESTION MODE: Large readable prompt =====
+        it.line(0, 30, 200, 30);
+        it.printf(100, 50, id(font_large), TextAlign::TOP_CENTER, "?");
+        it.printf(100, 90, id(font_medium), TextAlign::TOP_CENTER, "%s", message.c_str());
+        
+        // Button hints at bottom
+        it.rectangle(0, 170, 200, 30);
+        it.printf(50, 180, id(font_small), TextAlign::TOP_CENTER, "YES");
+        it.printf(150, 180, id(font_small), TextAlign::TOP_CENTER, "NO");
+        
+      } else if (mode == "LISTENING") {
+        // ===== VOICE INPUT MODE =====
+        it.printf(100, 90, id(font_large), TextAlign::TOP_CENTER, "🎤");
+        it.printf(100, 130, id(font_medium), TextAlign::TOP_CENTER, "Listening...");
+        
+      } else if (mode == "PROCESSING") {
+        // ===== PROCESSING MODE =====
+        it.printf(100, 90, id(font_large), TextAlign::TOP_CENTER, "⚙️");
+        it.printf(100, 130, id(font_medium), TextAlign::TOP_CENTER, "Processing...");
+      }
+
+# WiFi
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: none
+  
+  ap:
+    ssid: "Clawd-Pager-ePaper"
+    password: "lobster2024"
+
+# API for ESPHome connection
+api:
+  encryption:
+    key: !secret api_key
+  services:
+    - service: show_message
+      variables:
+        message: string
+        mode: string
+      then:
+        - text_sensor.template.publish:
+            id: pager_display
+            state: !lambda 'return message;'
+        - text_sensor.template.publish:
+            id: display_mode
+            state: !lambda 'return mode;'
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+logger:
+  level: DEBUG
+
+# Fonts optimized for ePaper readability
+font:
+  - file: "gfonts://Roboto Mono"
+    id: font_small
+    size: 12
+    glyphs: "!\"#%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~ °"
+  
+  - file: "gfonts://Roboto Mono"
+    id: font_medium
+    size: 16
+    glyphs: "!\"#%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~ °"
+  
+  - file: "gfonts://Roboto Mono"
+    id: font_large
+    size: 24
+    glyphs: "!\"#%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~?🎤⚙️"
+
+# Sensors for dashboard
+sensor:
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    id: wifi_signal
+    update_interval: 60s
+  
+  # Placeholder for battery (adjust based on PMIC ETA6098)
+  - platform: template
+    name: "Battery Percent"
+    id: battery_percent
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    lambda: 'return 85.0;'  # TODO: Read from PMIC
+
+text_sensor:
+  - platform: wifi_info
+    ssid:
+      name: "WiFi SSID"
+      id: wifi_ssid
+    ip_address:
+      name: "WiFi IP"
+      id: wifi_ip
+  
+  - platform: template
+    name: "Pager Display"
+    id: pager_display
+    
+  - platform: template
+    name: "Display Mode"
+    id: display_mode
