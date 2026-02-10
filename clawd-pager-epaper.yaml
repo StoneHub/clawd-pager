@@ -19,36 +19,38 @@ esp32:
     version: recommended
 
 # I2C Bus for RTC (PCF85063), PMIC (ETA6098), Audio Codec (ES8311)
-i2c:
-  sda: GPIO8   # Common ESP32-S3 I2C SDA
-  scl: GPIO9   # Common ESP32-S3 I2C SCL
-  scan: true
-  frequency: 400kHz
+# TODO: Find correct I2C pins from schematic (GPIO9 conflicts with EPD_BUSY)
+# i2c:
+#   sda: GPIO8   # Common ESP32-S3 I2C SDA
+#   scl: GPIO9   # Common ESP32-S3 I2C SCL (CONFLICTS with EPD_BUSY!)
+#   scan: true
+#   frequency: 400kHz
 
-# Real-Time Clock (PCF85063)
-time:
-  - platform: pcf85063
-    id: rtc_time
-    update_interval: 60s
+# Real-Time Clock (PCF85063) - requires I2C
+# TODO: Re-enable after finding correct I2C pins
+# time:
+#   - platform: pcf85063
+#     id: rtc_time
+#     timezone: America/New_York
+#     update_interval: 60s
 
 # ePaper Display (200x200 pixels)
-# High contrast, perfect for dense information layouts
-# Standard Waveshare ESP32-S3 ePaper pinout
+# Pins verified from Waveshare ESP32-S3-ePaper-1.54 schematic
 spi:
-  clk_pin: GPIO13   # SCLK
-  mosi_pin: GPIO14  # DIN/MOSI
+  clk_pin: GPIO13   # EPD_SCLK
+  mosi_pin: GPIO14  # EPD_SDI (MOSI)
   id: epaper_spi
 
 display:
   - platform: waveshare_epaper
     # Waveshare ESP32-S3 1.54inch e-Paper (200×200, Black/White)
-    # Controller: SSD1681 (most likely for b/w version)
+    # Controller: SSD1681
     model: 1.54in
     spi_id: epaper_spi
-    cs_pin: GPIO15    # Chip Select
-    dc_pin: GPIO27    # Data/Command
-    reset_pin: GPIO26 # Reset
-    busy_pin: GPIO25  # Busy status
+    cs_pin: GPIO12    # EPD_CS
+    dc_pin: GPIO11    # EPD_D/C
+    reset_pin: GPIO10 # EPD_RST
+    busy_pin: GPIO9   # EPD_BUSY
     rotation: 0
     update_interval: 30s
     full_update_every: 30  # Prevent ghosting
@@ -60,10 +62,10 @@ display:
       // Clear screen
       it.fill(COLOR_OFF);
       
-      // Header: Time + Status (top 30px)
+      // Header: Status (top 30px)
       it.rectangle(0, 0, 200, 30);
-      auto time = id(rtc_time).now();
-      it.strftime(5, 8, id(font_medium), TextAlign::TOP_LEFT, "%H:%M", time);
+      // TODO: Add time display when RTC/I2C pins found
+      it.printf(5, 8, id(font_medium), TextAlign::TOP_LEFT, "PAGER");
       it.printf(195, 8, id(font_small), TextAlign::TOP_RIGHT, "%.0f%%", id(battery_percent).state);
       
       if (mode == "DASHBOARD") {
@@ -155,13 +157,12 @@ font:
   - file: "gfonts://Roboto Mono"
     id: font_large
     size: 24
-    glyphs: "!\"#%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~?🎤⚙️"
 
 # Sensors for dashboard
 sensor:
   - platform: wifi_signal
     name: "WiFi Signal"
-    id: wifi_signal
+    id: wifi_rssi
     update_interval: 60s
   
   # Placeholder for battery (adjust based on PMIC ETA6098)
