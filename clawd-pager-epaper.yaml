@@ -11,6 +11,10 @@ esphome:
       - text_sensor.template.publish:
           id: display_mode
           state: "DASHBOARD"
+      - delay: 2s
+      - logger.log: "Triggering initial display update..."
+      - component.update: epaper_display
+      - logger.log: "✅ Display update complete"
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -43,6 +47,7 @@ spi:
 
 display:
   - platform: waveshare_epaper
+    id: epaper_display
     # Waveshare ESP32-S3 1.54inch e-Paper (200×200, Black/White)
     # Controller: SSD1681
     model: 1.54in
@@ -52,61 +57,13 @@ display:
     reset_pin: GPIO10 # EPD_RST
     busy_pin: GPIO9   # EPD_BUSY
     rotation: 0
-    update_interval: 30s
+    update_interval: 60s  # Reduced frequency to save power
     full_update_every: 30  # Prevent ghosting
     lambda: |-
-      // High-density dashboard layout for 200x200 ePaper
-      auto mode = id(display_mode).state;
-      auto message = id(pager_display).state;
-      
-      // Clear screen
+      // Minimal test - just text, no sensors
       it.fill(COLOR_OFF);
-      
-      // Header: Status (top 30px)
-      it.rectangle(0, 0, 200, 30);
-      // TODO: Add time display when RTC/I2C pins found
-      it.printf(5, 8, id(font_medium), TextAlign::TOP_LEFT, "PAGER");
-      it.printf(195, 8, id(font_small), TextAlign::TOP_RIGHT, "%.0f%%", id(battery_percent).state);
-      
-      if (mode == "DASHBOARD") {
-        // ===== DASHBOARD MODE: Max info density =====
-        // Section 1: Agent Status (30-80px)
-        it.line(0, 30, 200, 30);
-        it.printf(5, 35, id(font_small), "AGENT:");
-        it.printf(5, 50, id(font_medium), "%s", message.c_str());
-        
-        // Section 2: Tasks/Notifications (80-140px)
-        it.line(0, 80, 200, 80);
-        it.printf(5, 85, id(font_small), "TASKS:");
-        // TODO: Show task queue here
-        it.printf(5, 100, id(font_small), "• Awaiting input...");
-        
-        // Section 3: Quick Stats (140-200px)
-        it.line(0, 140, 200, 140);
-        it.printf(5, 145, id(font_small), "WIFI: %s", id(wifi_ssid).state.c_str());
-        it.printf(5, 160, id(font_small), "IP: %s", id(wifi_ip).state.c_str());
-        
-      } else if (mode == "QUESTION") {
-        // ===== QUESTION MODE: Large readable prompt =====
-        it.line(0, 30, 200, 30);
-        it.printf(100, 50, id(font_large), TextAlign::TOP_CENTER, "?");
-        it.printf(100, 90, id(font_medium), TextAlign::TOP_CENTER, "%s", message.c_str());
-        
-        // Button hints at bottom
-        it.rectangle(0, 170, 200, 30);
-        it.printf(50, 180, id(font_small), TextAlign::TOP_CENTER, "YES");
-        it.printf(150, 180, id(font_small), TextAlign::TOP_CENTER, "NO");
-        
-      } else if (mode == "LISTENING") {
-        // ===== VOICE INPUT MODE =====
-        it.printf(100, 90, id(font_large), TextAlign::TOP_CENTER, "🎤");
-        it.printf(100, 130, id(font_medium), TextAlign::TOP_CENTER, "Listening...");
-        
-      } else if (mode == "PROCESSING") {
-        // ===== PROCESSING MODE =====
-        it.printf(100, 90, id(font_large), TextAlign::TOP_CENTER, "⚙️");
-        it.printf(100, 130, id(font_medium), TextAlign::TOP_CENTER, "Processing...");
-      }
+      it.rectangle(0, 0, 200, 200);
+      it.printf(100, 100, id(font_large), TextAlign::CENTER, "CLAWD");
 
 # WiFi
 wifi:
@@ -134,13 +91,22 @@ api:
         - text_sensor.template.publish:
             id: display_mode
             state: !lambda 'return mode;'
+        - component.update: epaper_display
+    
+    - service: refresh_display
+      then:
+        - logger.log: "Manual display refresh requested"
+        - component.update: epaper_display
 
 ota:
   - platform: esphome
     password: !secret ota_password
 
 logger:
-  level: DEBUG
+  level: VERBOSE  # Maximum logging to diagnose display issues
+  logs:
+    component: DEBUG
+    display: VERBOSE
 
 # Fonts optimized for ePaper readability
 font:
