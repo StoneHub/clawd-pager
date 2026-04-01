@@ -1,16 +1,21 @@
 # Clawd Pager 🦞📟
 
-Clawd Pager is the **device-side / hardware surface** of Monroe's AI session companion work.
+Clawd Pager is a **hardware companion for AI sessions**.
 
-It turns M5StickC Plus and ePaper devices into glanceable companions for coding sessions: showing live activity, surfacing approval prompts, and keeping sessions moving while you're away from the desk.
+It turns M5StickC Plus and ePaper devices into glanceable, always-available companions for coding sessions: showing live activity, surfacing approval prompts, and keeping sessions moving while you're away from the desk.
 
-## Product family position
+## Positioning
 
-If you want the broader repo map:
-- **`clawd-pager`** = physical companion devices / pager hardware
-- **`claude-conduit`** = mobile remote session client
+Clawd Pager is meant to **complement**, not replace, richer mobile and desktop AI experiences.
 
-Both are part of the same broader direction: **remote AI session companions** across multiple surfaces.
+The value of the hardware is in what it does better than a phone:
+- instant glanceability
+- persistent physical presence on a desk, dock, or workshop surface
+- dedicated yes/no and acknowledge interactions
+- ambient status and alerts without unlocking another screen
+- purpose-built away-from-desk workflows
+
+In short: the phone can be the rich remote UI; **Clawd Pager is the physical interrupt and awareness layer**.
 
 ## Quick Start (New Machine)
 
