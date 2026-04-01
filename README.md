@@ -1,6 +1,16 @@
 # Clawd Pager 🦞📟
 
-Remote control Claude Code sessions from M5StickC Plus and ePaper pagers. Monitor AI activity, answer questions, and keep coding sessions moving while away from your desk.
+Clawd Pager is the **device-side / hardware surface** of Monroe's AI session companion work.
+
+It turns M5StickC Plus and ePaper devices into glanceable companions for coding sessions: showing live activity, surfacing approval prompts, and keeping sessions moving while you're away from the desk.
+
+## Product family position
+
+If you want the broader repo map:
+- **`clawd-pager`** = physical companion devices / pager hardware
+- **`claude-conduit`** = mobile remote session client
+
+Both are part of the same broader direction: **remote AI session companions** across multiple surfaces.
 
 ## Quick Start (New Machine)
 
