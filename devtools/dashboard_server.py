@@ -21,9 +21,10 @@ import asyncio
 import json
 import argparse
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Set, Dict, Any
+from typing import Optional, Set, Dict, Any, List
 from dataclasses import dataclass, asdict
 
 try:
@@ -33,8 +34,19 @@ except ImportError:
     HAS_AIOHTTP = False
     print("aiohttp not installed. Run: pip install aiohttp")
 
+try:
+    from anthropic import Anthropic
+    HAS_ANTHROPIC = True
+except ImportError:
+    HAS_ANTHROPIC = False
+    print("anthropic not installed. Run: pip install anthropic")
+
 from .event_logger import EventLogger, EventSource, PagerEvent, get_logger
 from .session_manager import SessionManager, get_session_manager
+
+
+# Persistence file for summaries
+SUMMARIES_FILE = Path.home() / '.clawd' / 'pager_summaries.json'
 
 
 logging.basicConfig(
@@ -90,6 +102,56 @@ class DashboardServer:
         self.device_state = DeviceState()
         self.app: Optional[web.Application] = None
         self._running = False
+        
+        # Activity summarization
+        self.event_batch: List[PagerEvent] = []
+        self.summaries: List[Dict[str, Any]] = []
+        self.max_summaries = 20
+        self.batch_size = 10
+        self.batch_timeout_seconds = 300  # 5 minutes
+        self._last_batch_time = datetime.now()
+        self._batch_timer_task: Optional[asyncio.Task] = None
+        self._batch_lock = asyncio.Lock()  # Prevent race conditions on batch operations
+        
+        # Initialize Anthropic client if available
+        self.anthropic_client = None
+        api_key = os.getenv('ANTHROPIC_API_KEY')
+        
+        if not api_key:
+            logger.warning("ANTHROPIC_API_KEY not set - Haiku summarization disabled, using fallback")
+            self.anthropic_client = None
+        else:
+            try:
+                if HAS_ANTHROPIC:
+                    self.anthropic_client = Anthropic(api_key=api_key)
+                    logger.info("Haiku summarization enabled")
+                else:
+                    logger.warning("anthropic package not installed - summaries will be disabled")
+            except Exception as e:
+                logger.warning(f"Could not initialize Anthropic client: {e}")
+                self.anthropic_client = None
+        
+        # Load persisted summaries
+        self.load_summaries()
+
+    def load_summaries(self):
+        """Load summaries from disk on startup."""
+        if SUMMARIES_FILE.exists():
+            try:
+                with open(SUMMARIES_FILE, 'r') as f:
+                    self.summaries = json.load(f)
+                logger.info(f"Loaded {len(self.summaries)} summaries from disk")
+            except Exception as e:
+                logger.warning(f"Could not load summaries: {e}")
+
+    def save_summaries(self):
+        """Save summaries to disk after adding new one."""
+        try:
+            SUMMARIES_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with open(SUMMARIES_FILE, 'w') as f:
+                json.dump(self.summaries, f)
+        except Exception as e:
+            logger.warning(f"Could not save summaries: {e}")
 
     def setup_routes(self):
         """Configure HTTP routes and WebSocket endpoint."""
@@ -97,6 +159,21 @@ class DashboardServer:
             raise RuntimeError("aiohttp is required for dashboard server")
 
         self.app = web.Application()
+        
+        # Add CORS middleware to allow React dev server connections
+        @web.middleware
+        async def cors_middleware(request, handler):
+            if request.method == 'OPTIONS':
+                response = web.Response()
+            else:
+                response = await handler(request)
+            
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+            return response
+        
+        self.app.middlewares.append(cors_middleware)
 
         # REST API endpoints
         self.app.router.add_get('/api/events', self.handle_get_events)
@@ -104,6 +181,10 @@ class DashboardServer:
         self.app.router.add_get('/api/sessions', self.handle_get_sessions)
         self.app.router.add_get('/api/session/{session_id}', self.handle_get_session)
         self.app.router.add_get('/api/state', self.handle_get_state)
+        self.app.router.add_get('/api/summaries', self.handle_get_summaries)
+        self.app.router.add_get('/api/usage/monthly', self.handle_get_monthly_usage)
+        self.app.router.add_get('/api/subagents/status', self.handle_get_subagent_status)
+        self.app.router.add_get('/api/activity/enhanced', self.handle_get_enhanced_activity)
         self.app.router.add_post('/api/log', self.handle_log_event)
         self.app.router.add_post('/api/session/start', self.handle_start_session)
         self.app.router.add_post('/api/session/end', self.handle_end_session)
@@ -165,13 +246,138 @@ class DashboardServer:
         """Get current device state."""
         return web.json_response(self.device_state.to_dict())
 
+    async def handle_get_summaries(self, request: web.Request) -> web.Response:
+        """Get recent activity summaries."""
+        return web.json_response(self.summaries)
+
+    async def handle_get_monthly_usage(self, request: web.Request) -> web.Response:
+        """Get monthly token usage statistics from real OpenClaw session data."""
+        try:
+            from .openclaw_usage import get_monthly_usage
+            usage_data = get_monthly_usage()
+            return web.json_response(usage_data)
+        except Exception as e:
+            logger.error(f"Failed to get OpenClaw usage data: {e}")
+            # Fallback to empty data on error
+            from datetime import datetime
+            return web.json_response({
+                "current_month": {
+                    "month": datetime.now().strftime("%Y-%m"),
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cache_tokens": 0,
+                    "cost": 0.0
+                },
+                "historical": [],
+                "by_model": {}
+            })
+
+    async def handle_get_subagent_status(self, request: web.Request) -> web.Response:
+        """Get status of active and recent sub-agents."""
+        # TODO: Integrate with OpenClaw sessions API
+        # For now, return mock data
+        import random
+        
+        # Check if there are recent summaries to simulate activity
+        has_activity = len(self.summaries) > 0
+        
+        active = []
+        if has_activity and random.random() > 0.5:
+            active.append({
+                "id": "subagent-001",
+                "name": "build-web-dashboard",
+                "model": "claude-opus-4-6",
+                "status": "active",
+                "runtime": 145,
+                "task": "Building React dashboard with 3 widgets"
+            })
+        
+        recent = []
+        if len(self.summaries) > 0:
+            recent.append({
+                "id": "subagent-000",
+                "name": "research-dashboard",
+                "model": "claude-sonnet-4-5",
+                "status": "completed",
+                "runtime": 89,
+                "task": "Research modern dashboard frameworks",
+                "result": "Recommended React + shadcn/ui stack"
+            })
+        
+        return web.json_response({
+            "active": active,
+            "recent": recent,
+            "queue": []
+        })
+
+    async def handle_get_enhanced_activity(self, request: web.Request) -> web.Response:
+        """Get enhanced activity data with detailed context."""
+        # Use existing summaries and events to build enhanced view
+        recent_events = self.event_logger.get_recent_events(10, 'TOOL_START')
+        
+        # Extract tool calls from recent events
+        tool_calls = []
+        for event in recent_events[:5]:
+            data = event.data or {}
+            tool_call = {
+                "tool": data.get('tool', 'unknown')
+            }
+            
+            if 'file' in data:
+                tool_call['file'] = data['file']
+            if 'line' in data:
+                tool_call['line'] = data['line']
+            if 'command' in data:
+                tool_call['command'] = data['command']
+            if 'status' in data:
+                tool_call['result'] = data['status']
+                
+            tool_calls.append(tool_call)
+        
+        # Use most recent summary if available
+        summary_text = None
+        timestamp = datetime.now().isoformat()
+        if self.summaries:
+            summary_text = self.summaries[0].get('text', '')
+            timestamp = self.summaries[0].get('timestamp', timestamp)
+        
+        return web.json_response({
+            "timestamp": timestamp,
+            "user_prompt": "Build modern web dashboard with enhanced widgets",
+            "agent_goal": "Create React app with 3 widgets, WebSocket connection, and responsive dark theme",
+            "active_todos": [
+                "Create React + Vite scaffold",
+                "Install shadcn/ui + Tailwind",
+                "Build 3 widget components",
+                "Add backend API endpoints",
+                "Test WebSocket connection"
+            ],
+            "tool_calls": tool_calls,
+            "summary": summary_text or "Working on dashboard development"
+        })
+
     async def handle_log_event(self, request: web.Request) -> web.Response:
         """Log an event from external source (dev scripts)."""
         try:
             data = await request.json()
-            source = EventSource(data.get('source', 'user'))
-            event_type = data.get('event_type', 'UNKNOWN')
-            event_data = data.get('data', {})
+        except Exception as e:
+            return web.json_response({"error": "Invalid JSON"}, status=400)
+        
+        # Validate event_type
+        VALID_EVENT_TYPES = ['TOOL_START', 'TOOL_END', 'AGENT_WORKING', 'AGENT_WAITING', 
+                             'BUTTON_PRESS', 'BUTTON_RELEASE', 'DISPLAY_UPDATE', 'BATTERY_UPDATE']
+        event_type = data.get('event_type', 'UNKNOWN')
+        if event_type not in VALID_EVENT_TYPES:
+            return web.json_response({"error": f"Invalid event_type: {event_type}"}, status=400)
+        
+        # Validate data size
+        event_data = data.get('data', {})
+        if len(json.dumps(event_data)) > 10000:  # 10KB limit
+            return web.json_response({"error": "Event data too large"}, status=400)
+        
+        source = EventSource(data.get('source', 'user'))
+        
+        try:
 
             event = self.event_logger.log(source, event_type, event_data)
 
@@ -206,6 +412,24 @@ class DashboardServer:
 
             # Broadcast to connected dashboards
             await self.broadcast_event(event)
+            
+            # Add to batch for summarization (only relevant event types)
+            if event_type in ['TOOL_START', 'TOOL_END', 'AGENT_WORKING', 'AGENT_WAITING']:
+                async with self._batch_lock:
+                    self.event_batch.append(event)
+                
+                # Check if we should summarize
+                time_elapsed = (datetime.now() - self._last_batch_time).total_seconds()
+                should_summarize = (
+                    len(self.event_batch) >= self.batch_size or 
+                    time_elapsed >= self.batch_timeout_seconds
+                )
+                
+                if should_summarize:
+                    asyncio.create_task(self.summarize_batch())
+                elif self._batch_timer_task is None or self._batch_timer_task.done():
+                    # Start/restart the batch timer
+                    self._batch_timer_task = asyncio.create_task(self.batch_timer())
 
             return web.json_response({"status": "logged", "sequence": event.sequence})
         except Exception as e:
@@ -367,6 +591,123 @@ class DashboardServer:
             return web.json_response({"success": False, "error": "Upload timed out"})
         except Exception as e:
             return web.json_response({"success": False, "error": str(e)})
+
+    async def batch_timer(self):
+        """Timer to trigger batch summarization after timeout."""
+        try:
+            await asyncio.sleep(self.batch_timeout_seconds)
+            if self.event_batch:
+                await self.summarize_batch()
+        except asyncio.CancelledError:
+            pass
+
+    async def summarize_batch(self):
+        """Summarize the current batch of events using Claude Haiku."""
+        if not self.event_batch:
+            return
+        
+        # Cancel any pending timer
+        if self._batch_timer_task and not self._batch_timer_task.done():
+            self._batch_timer_task.cancel()
+            self._batch_timer_task = None
+        
+        # Take the current batch and clear it
+        async with self._batch_lock:
+            batch = self.event_batch[:]
+            self.event_batch.clear()
+        self._last_batch_time = datetime.now()
+        
+        logger.info(f"Summarizing batch of {len(batch)} events...")
+        
+        # Check if Anthropic is available
+        if not self.anthropic_client:
+            logger.warning("Anthropic client not available, skipping summarization")
+            return
+        
+        try:
+            # Build event context for Haiku
+            event_text = []
+            for event in batch:
+                ts = event.timestamp.split('T')[1][:8] if 'T' in event.timestamp else event.timestamp
+                event_type = event.event_type
+                data = event.data or {}
+                
+                if event_type == 'TOOL_START':
+                    tool = data.get('tool', 'unknown')
+                    command = data.get('command', '')
+                    event_text.append(f"[{ts}] TOOL_START: {tool} - {command}")
+                elif event_type == 'TOOL_END':
+                    tool = data.get('tool', 'unknown')
+                    status = data.get('status', 'unknown')
+                    event_text.append(f"[{ts}] TOOL_END: {tool} - {status}")
+                elif event_type == 'AGENT_WORKING':
+                    tool = data.get('tool', 'unknown')
+                    status = data.get('status', '')
+                    event_text.append(f"[{ts}] AGENT_WORKING: {tool} {status}")
+                elif event_type == 'AGENT_WAITING':
+                    event_text.append(f"[{ts}] AGENT_WAITING: Ready for user input")
+                else:
+                    event_text.append(f"[{ts}] {event_type}: {data}")
+            
+            events_str = '\n'.join(event_text)
+            
+            # Call Claude Haiku
+            try:
+                message = self.anthropic_client.messages.create(
+                    model="claude-3-7-haiku-20250219",  # Updated model
+                    max_tokens=150,
+                    timeout=30.0,  # 30 second timeout to prevent hanging
+                    messages=[{
+                        "role": "user",
+                        "content": f"""Summarize these tool events into ONE concise human-readable sentence describing the task completed. Be specific but brief.
+
+Events:
+{events_str}
+
+Respond with ONLY the summary sentence, nothing else."""
+                    }]
+                )
+                
+                summary_text = message.content[0].text.strip()
+            except Exception as api_error:
+                # Fallback to simple summary if API fails
+                logger.warning(f"API call failed: {api_error}, using fallback summary")
+                tool_names = set()
+                for event in batch:
+                    if event.event_type == 'TOOL_START':
+                        tool = event.data.get('tool', 'unknown')
+                        tool_names.add(tool)
+                
+                if tool_names:
+                    summary_text = f"Completed {len(batch)} operations using {', '.join(tool_names)}"
+                else:
+                    summary_text = f"Completed {len(batch)} agent operations"
+            
+            # Create summary object
+            summary = {
+                "timestamp": datetime.now().isoformat(timespec='seconds'),
+                "text": summary_text,
+                "event_count": len(batch)
+            }
+            
+            # Add to summaries (rolling buffer)
+            self.summaries.insert(0, summary)
+            if len(self.summaries) > self.max_summaries:
+                self.summaries = self.summaries[:self.max_summaries]
+            
+            # Persist summaries to disk
+            self.save_summaries()
+            
+            logger.info(f"Generated summary: {summary_text}")
+            
+            # Broadcast summary to dashboards
+            await self.broadcast({
+                "type": "summary",
+                "data": summary
+            })
+            
+        except Exception as e:
+            logger.error(f"Failed to summarize batch: {e}")
 
     async def websocket_handler(self, request: web.Request) -> web.WebSocketResponse:
         """Handle WebSocket connections for live updates."""

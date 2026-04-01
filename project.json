@@ -1,0 +1,30 @@
+{
+  "slug": "clawd-pager",
+  "name": "clawd-pager",
+  "tagline": "Remote pager for AI coding sessions",
+  "summary": "clawd-pager is a hardware-backed alerting and remote-control system for AI coding sessions, built around M5StickC Plus and ePaper pager devices.",
+  "status": "active",
+  "visibility": "private",
+  "links": {
+    "repo": "https://github.com/StoneHub/clawd-pager",
+    "live": "",
+    "download": "",
+    "demo": ""
+  },
+  "tech": ["ESPHome", "Python", "WebSockets", "Hardware"],
+  "highlights": [
+    "Remote monitoring for coding session activity",
+    "Bridge server, dashboard feed, and pager device integration",
+    "Built for practical away-from-desk workflows"
+  ],
+  "content": {
+    "readme": "README.md",
+    "shortDescription": "A low-friction hardware pager system for monitoring and nudging coding sessions from lightweight devices."
+  },
+  "portfolio": {
+    "featured": true,
+    "priority": 4,
+    "category": "Ops"
+  },
+  "updatedAt": "2026-03-20"
+}
